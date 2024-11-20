@@ -11,6 +11,8 @@ from emoji import emojize
 
 logging.basicConfig(level=logging.INFO)
 
+UTC_PLUS_2 = timezone(timedelta(hours=2))
+
 
 class Monitor:
     def __init__(self, bot: Bot, host: str, chat_ids: List[int], check_interval: int, db_file: str):
@@ -108,7 +110,7 @@ class Monitor:
                 self.last_host_status = is_up
                 self.status_change_time = datetime.now(timezone.utc)
 
-                current_time = datetime.now().strftime('%H:%M')
+                current_time = datetime.now(UTC_PLUS_2).strftime('%H:%M')
                 if total_time:
                     hours, remainder = divmod(
                         int(total_time.total_seconds()), 3600)
