@@ -42,8 +42,7 @@ async def send_daily_statistics(bot_token: str, chat_id: int, db_file: str):
         # If no data for the previous day
         if not rows:
             message = emojize(
-                f"💡Статистика за вчора ({
-                    yesterday_local.strftime('%Y-%m-%d')}):\n\n"
+                f"💡Статистика за вчора ({yesterday_local.strftime('%Y-%m-%d')}):\n\n"
                 "Немає даних за вчора."
             )
             await bot.send_message(chat_id, message)
@@ -60,6 +59,7 @@ async def send_daily_statistics(bot_token: str, chat_id: int, db_file: str):
         for status, time_str in rows:
             current_time = datetime.fromisoformat(time_str)
             duration = current_time - previous_time
+            print(status, time_str, duration)
 
             if previous_status:
                 total_on_time += duration
