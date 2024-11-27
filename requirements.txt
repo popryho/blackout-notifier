@@ -1,4 +1,1 @@
-aiogram
-aiosqlite
-emoji
 requests
