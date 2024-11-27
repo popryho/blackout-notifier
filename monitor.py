@@ -101,8 +101,8 @@ class Monitor:
             try:
                 response = requests.post(url, data=data)
                 if response.status_code != 200:
-                    logging.error(f"Failed to send message to {
-                                  chat_id}: {response.text}")
+                    logging.error(
+                        f"Failed to send message to {chat_id}: {response.text}")
             except Exception as e:
                 logging.error(
                     f"Exception when sending message to {chat_id}: {e}")
