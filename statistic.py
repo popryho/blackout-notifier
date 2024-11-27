@@ -40,15 +40,15 @@ def build_message(date_str: str, total_on_time: timedelta, total_off_time: timed
     message_header = f"Статистика за вчора ({date_str}):\n"
 
     if total_off_time == timedelta():
-        message_body = "\nЕлектрика була увесь день!"
+        message_body = "\n🥳Електрика була увесь день!"
     elif total_on_time == timedelta():
-        message_body = "\nЕлектрика була відсутня весь день."
+        message_body = "\n😞Електрика була відсутня весь день."
     else:
         total_on_str = format_duration(total_on_time)
         total_off_str = format_duration(total_off_time)
         message_body = (
-            f"\nЕлектрика присутня: {total_on_str}.\n"
-            f"Електрика відсутня: {total_off_str}."
+            f"\n🟢Електрика присутня: {total_on_str}.\n"
+            f"🔴Електрика відсутня: {total_off_str}."
         )
 
     return message_header + message_body
