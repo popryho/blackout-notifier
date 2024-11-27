@@ -255,8 +255,8 @@ class Monitor:
                         next_outage_start = event_info['start'].strftime(
                             '%H:%M')
                         next_outage_end = event_info['end'].strftime('%H:%M')
-                        next_event_str = f"{
-                            next_outage_start} - {next_outage_end}"
+                        next_event_str = \
+                            f"{next_outage_start} - {next_outage_end}"
                         message += emojize(
                             f"\n🗓 Наступне планове: {next_event_str}")
                 else:
