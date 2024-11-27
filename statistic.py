@@ -37,7 +37,7 @@ def get_time_range_for_yesterday() -> tuple:
 
 
 def build_message(date_str: str, total_on_time: timedelta, total_off_time: timedelta) -> str:
-    message_header = f"Статистика за вчора ({date_str}):\n"
+    message_header = f"💡Статистика за вчора ({date_str}):\n"
 
     if total_off_time == timedelta():
         message_body = "\n🥳Електрика була увесь день!"
