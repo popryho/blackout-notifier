@@ -46,7 +46,7 @@ async def send_daily_statistics(bot_token: str, chat_id: int, db_file: str):
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                previous_status = row[0][0]
+                previous_status = row[0]
             else:
                 previous_status = 1  # Adjust if your default is different
 
