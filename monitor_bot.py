@@ -2,10 +2,11 @@ import argparse
 import asyncio
 import logging
 import subprocess
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Tuple, List
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Tuple
 
 import aiosqlite
+import requests
 from aiogram import Bot, Dispatcher
 from emoji import emojize
 
@@ -15,12 +16,21 @@ UTC_PLUS_2 = timezone(timedelta(hours=2))
 
 
 class Monitor:
-    def __init__(self, bot: Bot, host: str, chat_ids: List[int], check_interval: int, db_file: str):
+    def __init__(
+        self,
+        bot: Bot,
+        host: str,
+        chat_ids: List[int],
+        check_interval: int,
+        db_file: str,
+        group_id: str,
+    ):
         self.bot = bot
         self.host = host
         self.chat_ids = chat_ids
         self.check_interval = check_interval
         self.db_file = db_file
+        self.group_id = group_id
         self.last_host_status: Optional[bool] = None
         self.status_change_time: Optional[datetime] = None
 
@@ -86,6 +96,112 @@ class Monitor:
         for chat_id in self.chat_ids:
             await self.bot.send_message(chat_id, message)
 
+    async def get_next_event(self, is_up: bool):
+        current_time = datetime.now(UTC_PLUS_2)
+
+        url = "https://api.yasno.com.ua/api/v1/pages/home/schedule-turn-off-electricity"
+        try:
+            response = requests.get(url)
+            data = response.json()
+        except Exception as e:
+            logging.error(f"Error fetching schedule: {e}")
+            return None, None
+
+        group_number = self.group_id
+
+        today_date = current_time.date()
+        tomorrow_date = today_date + timedelta(days=1)
+
+        today_schedule = []
+        tomorrow_schedule = []
+
+        try:
+            today_schedule = data['components'][4]['dailySchedule']['kiev']['today']['groups'][group_number]
+        except KeyError:
+            logging.warning("Today's schedule is not available.")
+        try:
+            tomorrow_schedule = data['components'][4]['dailySchedule']['kiev']['tomorrow']['groups'][group_number]
+        except KeyError:
+            logging.warning("Tomorrow's schedule is not available.")
+
+        if not today_schedule and not tomorrow_schedule:
+            logging.warning("No schedule information available.")
+            return None, None
+
+        def convert_schedule_to_datetime(schedule, date):
+            datetime_intervals = []
+            for interval in schedule:
+                start_hour = interval['start']
+                end_hour = interval['end']
+                start_datetime = datetime.combine(date, datetime.min.time()).replace(
+                    hour=start_hour, tzinfo=UTC_PLUS_2)
+                end_datetime = datetime.combine(date, datetime.min.time()).replace(
+                    hour=end_hour % 24, tzinfo=UTC_PLUS_2)
+                if end_hour >= 24 or end_hour < start_hour:
+                    end_datetime += timedelta(days=1)
+                datetime_intervals.append(
+                    {'start': start_datetime, 'end': end_datetime, 'type': interval['type']})
+            return datetime_intervals
+
+        full_intervals = []
+        if today_schedule:
+            today_intervals = convert_schedule_to_datetime(
+                today_schedule, today_date)
+            full_intervals.extend(today_intervals)
+        if tomorrow_schedule:
+            tomorrow_intervals = convert_schedule_to_datetime(
+                tomorrow_schedule, tomorrow_date)
+            full_intervals.extend(tomorrow_intervals)
+
+        def merge_intervals(intervals):
+            if not intervals:
+                return []
+            intervals.sort(key=lambda x: x['start'])
+            merged = [intervals[0]]
+            for current in intervals[1:]:
+                last = merged[-1]
+                if current['start'] == last['end'] and current['type'] == last['type']:
+                    last['end'] = current['end']
+                else:
+                    merged.append(current)
+            return merged
+
+        merged_intervals = merge_intervals(full_intervals)
+
+        def is_currently_in_outage(current_time, intervals):
+            for interval in intervals:
+                if interval['start'] <= current_time < interval['end']:
+                    return True, interval
+            return False, None
+
+        electricity_state = 'on' if is_up else 'off'
+
+        in_outage, current_interval = is_currently_in_outage(
+            current_time, merged_intervals)
+
+        def find_next_event(current_time, intervals, state):
+            if state == 'on':
+                for interval in intervals:
+                    if interval['start'] > current_time:
+                        return 'outage', interval
+                return None, None
+            elif state == 'off':
+                if in_outage:
+                    return 'available', {'start': current_interval['end']}
+                else:
+                    for interval in intervals:
+                        if interval['start'] > current_time:
+                            return 'available', {'start': interval['end']}
+                    return None, None
+            else:
+                logging.error("Invalid state.")
+                return None, None
+
+        event_type, event_info = find_next_event(
+            current_time, merged_intervals, electricity_state)
+
+        return event_type, event_info
+
     async def monitor(self):
         await self.init_db()
         self.last_host_status, self.status_change_time = await self.get_last_status()
@@ -110,27 +226,43 @@ class Monitor:
                 self.last_host_status = is_up
                 self.status_change_time = datetime.now(timezone.utc)
 
-                current_time = datetime.now(UTC_PLUS_2).strftime('%H:%M')
+                current_time = datetime.now(UTC_PLUS_2)
+                current_time_str = current_time.strftime('%H:%M')
                 if total_time:
                     hours, remainder = divmod(
                         int(total_time.total_seconds()), 3600)
                     minutes, _ = divmod(remainder, 60)
-                    duration_str = f"{hours} год. {minutes} хв."
+                    duration_str = f"{hours}год {minutes}хв"
                 else:
                     duration_str = "невідомо"
 
+                event_type, event_info = await self.get_next_event(is_up)
+
                 if is_up:
                     message = emojize(
-                        f":check_mark_button: Світло з'явилось\n"
-                        f":alarm_clock: Час: {current_time}\n\n"
-                        f":new_moon_face: Було відсутнім: {duration_str}"
+                        f"🟢 {current_time_str} Світло з'явилося\n"
+                        f"🕓 Його не було {duration_str}"
                     )
+                    if event_info is not None and event_type == 'outage':
+                        next_outage_start = event_info['start'].strftime(
+                            '%H:%M')
+                        next_outage_end = event_info['end'].strftime('%H:%M')
+                        next_event_str = f"{
+                            next_outage_start} - {next_outage_end}"
+                        message += emojize(
+                            f"\n🗓 Наступне планове: {next_event_str}")
                 else:
                     message = emojize(
-                        f":cross_mark: Світло зникло\n"
-                        f":alarm_clock: Час: {current_time}\n\n"
-                        f":full_moon_face: Було присутнім: {duration_str}"
+                        f"🔴 {current_time_str} Світло зникло\n"
+                        f"🕓 Воно було {duration_str}"
                     )
+                    if event_info is not None and event_type == 'available':
+                        expected_return_time = event_info['start'].strftime(
+                            '%H:%M')
+                        next_event_str = f"о {expected_return_time}"
+                        message += emojize(
+                            f"\n🗓 Очікуємо за графіком {next_event_str}")
+
                 await self.send_message(message)
                 logging.info(message)
 
@@ -164,6 +296,12 @@ def create_parser() -> argparse.ArgumentParser:
         default="state.db",
         help="SQLite database file (default: state.db)",
     )
+    parser.add_argument(
+        "--group-id",
+        type=str,
+        default="1",
+        help="Group ID for the schedule (default: 1)"
+    )
     return parser
 
 
@@ -175,7 +313,8 @@ async def main():
         host=args.host,
         chat_ids=args.chat_ids,
         check_interval=args.interval,
-        db_file=args.db_file
+        db_file=args.db_file,
+        group_id=args.group_id
     )
     asyncio.create_task(monitor.monitor())
     dp = Dispatcher()
