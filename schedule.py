@@ -111,8 +111,7 @@ def build_message(intervals: List[Dict], registry_update_time: datetime) -> str:
     grouped_intervals = group_and_merge_intervals(intervals)
     header = (
         f"🗓️ Графік відключень, {GROUP_ID} група\n"
-        f"🔄 Оновлено: {escape_markdown_v2(
-            registry_update_time.strftime('%d.%m.%Y %H:%M'))}"
+        f"🔄 Оновлено: {escape_markdown_v2(registry_update_time.strftime('%d.%m.%Y %H:%M'))}"
     )
     message_lines = [header]
 
