@@ -48,18 +48,17 @@ def init_host_status_table():
     logger.info("host_status table initialized.")
 
 
-def init_schedule_table():
-    """Initialize the schedule table with an additional registry_update_time field."""
+def init_outage_schedule_table():
+    """Initialize the outage_schedule table."""
     query = """
-        CREATE TABLE IF NOT EXISTS schedule (
+        CREATE TABLE IF NOT EXISTS outage_schedule (
             id BIGSERIAL PRIMARY KEY,
-            status BOOLEAN NOT NULL,
             time TIMESTAMPTZ NOT NULL UNIQUE,
             registry_update_time TIMESTAMPTZ NOT NULL
         )
     """
     execute_query(query)
-    logger.info("schedule table initialized.")
+    logger.info("outage_schedule table initialized.")
 
 
 def save_status(status: bool):
@@ -113,9 +112,9 @@ def get_last_status_before(time_point: datetime) -> bool:
 
 
 def check_schedule_updated(last_update_time: datetime) -> bool:
-    """Check if the schedule was updated based on the last_update_time."""
+    """Check if the outage schedule was updated based on the last_update_time."""
     result = execute_query(
-        "SELECT MAX(registry_update_time) FROM schedule",
+        "SELECT MAX(registry_update_time) FROM outage_schedule",
         fetch=True
     )
     if result and result[0][0]:
@@ -124,15 +123,15 @@ def check_schedule_updated(last_update_time: datetime) -> bool:
     return True  # No existing schedule, needs to update
 
 
-def update_schedule(schedule_entries: List[Tuple[bool, datetime, datetime]]):
-    """Update the schedule in the database."""
+def update_outage_schedule(schedule_entries: List[Tuple[datetime, datetime]]):
+    """Update the outage schedule in the database."""
     try:
         with connect_to_db() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM schedule WHERE time >= %s",
+            cur.execute("DELETE FROM outage_schedule WHERE time >= %s",
                         (datetime.now(UTC_PLUS_2),))
-            insert_query = "INSERT INTO schedule (status, time, registry_update_time) VALUES (%s, %s, %s)"
+            insert_query = "INSERT INTO outage_schedule (time, registry_update_time) VALUES (%s, %s)"
             cur.executemany(insert_query, schedule_entries)
             conn.commit()
-        logger.info("Schedule updated.")
+        logger.info("Outage schedule updated.")
     except Exception as e:
-        logger.error(f"Error updating schedule: {e}")
+        logger.error(f"Error updating outage schedule: {e}")

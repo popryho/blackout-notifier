@@ -8,8 +8,9 @@ import requests
 from loguru import logger
 
 from config import CHECK_INTERVAL, GROUP_ID, UTC_PLUS_2
-from db import check_schedule_updated, init_schedule_table, update_schedule
-from tg import send_telegram_message, format_duration
+from db import (check_schedule_updated, init_outage_schedule_table,
+                update_outage_schedule)
+from tg import format_duration, send_telegram_message
 
 
 def fetch_schedule() -> Tuple[List[Dict], datetime]:
@@ -24,15 +25,13 @@ def fetch_schedule() -> Tuple[List[Dict], datetime]:
         return [], datetime.min.replace(tzinfo=UTC_PLUS_2)
 
     group_number = GROUP_ID
-    today_date = current_time.date()
-    tomorrow_date = today_date + timedelta(days=1)
     schedules = []
 
-    for day_label, date in [('today', today_date), ('tomorrow', tomorrow_date)]:
+    for day_label, days_ahead in [('today', 0), ('tomorrow', 1)]:
+        date = current_time.date() + timedelta(days=days_ahead)
         try:
             schedule_data = data['components'][4]['dailySchedule']['kiev'][day_label]['groups'][group_number]
-            day_schedule = process_schedule(schedule_data, date)
-            schedules.extend(day_schedule)
+            schedules.extend(process_schedule(schedule_data, date))
         except (KeyError, IndexError):
             logger.warning(
                 f"{day_label.capitalize()}'s schedule is not available.")
@@ -45,63 +44,77 @@ def fetch_schedule() -> Tuple[List[Dict], datetime]:
 
 
 def process_schedule(schedule_data, date) -> List[Dict]:
-    """Process schedule data for a specific date."""
+    """Process schedule data for a specific date, only including outages."""
     schedule = []
     for interval in schedule_data:
+        if interval['type'] != 'DEFINITE_OUTAGE':
+            continue  # Only include outages
         start_hour = interval['start']
-        status = False if interval['type'] == 'DEFINITE_OUTAGE' else True
         time_slot = datetime(date.year, date.month, date.day,
                              start_hour, tzinfo=UTC_PLUS_2)
         if time_slot < datetime.now(UTC_PLUS_2):
             continue
         schedule.append({
             'start': time_slot,
-            'end': time_slot + timedelta(hours=1),
-            'status': status})
+            'end': time_slot + timedelta(hours=1)
+        })
     return schedule
 
 
-def merge_intervals(intervals: List[Dict]) -> List[Dict]:
-    """Merge consecutive intervals with the same status."""
-    if not intervals:
-        return []
+def group_and_merge_intervals_by_date(intervals: List[Dict]) -> Dict[datetime.date, List[Dict]]:
+    """Group intervals by date and merge consecutive intervals."""
     intervals.sort(key=lambda x: x['start'])
-    merged = [intervals[0]]
-    for current in intervals[1:]:
-        last = merged[-1]
-        if current['start'] == last['end'] and current['status'] == last['status']:
-            last['end'] = current['end']
+    grouped = {}
+    for interval in intervals:
+        date_key = interval['start'].date()
+        grouped.setdefault(date_key, [])
+        day_intervals = grouped[date_key]
+        if day_intervals and interval['start'] == day_intervals[-1]['end']:
+            day_intervals[-1]['end'] = interval['end']
         else:
-            merged.append(current)
-    return merged
+            day_intervals.append(interval)
+    return grouped
 
 
-def build_message(merged_intervals: List[Dict], registry_update_time: datetime) -> str:
-    """Build the Telegram message based on merged intervals."""
-    if not merged_intervals:
+def escape_markdown_v2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2."""
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    for char in special_chars:
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
+def build_message(intervals: List[Dict], registry_update_time: datetime) -> str:
+    """Build the Telegram message based on grouped and merged intervals."""
+    if not intervals:
         return ""
 
-    # Format the update time
-    update_time_str = f"🗓️ Графік відключень, {GROUP_ID} група\n🔄 Оновлено: {
-        registry_update_time.strftime('%d-%m %H:%M')}"
-    message_lines = [update_time_str]
+    grouped_intervals = group_and_merge_intervals_by_date(intervals)
 
-    for interval in merged_intervals:
-        if not interval['status']:  # Only include status = False
+    header = (
+        f"🗓️ Графік відключень, {GROUP_ID} група\n"
+        f"🔄 Оновлено: {escape_markdown_v2(
+            registry_update_time.strftime('%d.%m.%Y %H:%M'))}"
+    )
+    message_lines = [header]
+
+    for date in sorted(grouped_intervals.keys()):
+        date_str = date.strftime("на *%d\\.%m\\.%Y*")
+        message_lines.append(f"\n{date_str}")
+        for interval in grouped_intervals[date]:
             start_str = interval['start'].strftime("%H:%M")
             end_str = interval['end'].strftime("%H:%M")
             duration = interval['end'] - interval['start']
             duration_str = format_duration(duration)
-            line = f"▪️{start_str} - {end_str}  [{duration_str}]"
-            message_lines.append(line)
+            line = f"▪️ {start_str} - {end_str}  [{duration_str}]"
+            message_lines.append(escape_markdown_v2(line))
 
-    message = "\n".join(message_lines)
-    return message
+    return "\n".join(message_lines)
 
 
 def main():
     """Main function to fetch and update schedule periodically."""
-    init_schedule_table()
+    init_outage_schedule_table()
     while True:
         schedule_entries, registry_update_time = fetch_schedule()
         if registry_update_time == datetime.min.replace(tzinfo=UTC_PLUS_2):
@@ -113,16 +126,14 @@ def main():
             logger.info(f"Schedule last updated at: "
                         f"{registry_update_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            schedule_data = [(entry['status'], entry['start'], registry_update_time)
+            schedule_data = [(entry['start'], registry_update_time)
                              for entry in schedule_entries]
-            update_schedule(schedule_data)
+            update_outage_schedule(schedule_data)
 
-            merged = merge_intervals(schedule_entries)
-            merged_outages = [interval for interval in merged
-                              if not interval['status']]
-            message = build_message(merged_outages, registry_update_time)
+            message = build_message(schedule_entries, registry_update_time)
             if message:
-                send_telegram_message(message, parse_mode='HTML')
+                logger.debug(f"Sending message:\n{message}")
+                send_telegram_message(message, parse_mode='MarkdownV2')
             logger.info("Schedule updated and message sent.")
         else:
             logger.info("No new schedule data available.")
