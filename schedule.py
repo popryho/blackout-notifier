@@ -145,7 +145,6 @@ def update_and_notify():
 
         message = build_message(schedule_entries, registry_update_time)
         if message:
-            logger.debug(f"Sending message:\n{message}")
             send_telegram_message(message, parse_mode="MarkdownV2")
         logger.info("Schedule updated and message sent.")
     else:
