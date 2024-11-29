@@ -31,4 +31,12 @@ def format_duration(duration: timedelta) -> str:
         parts.append(f"{hours} год.")
     if minutes > 0 or hours == 0:
         parts.append(f"{minutes} хв.")
-    return ' '.join(parts)
+    return " ".join(parts)
+
+
+def escape_markdown_v2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2."""
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    for char in special_chars:
+        text = text.replace(char, f"\\{char}")
+    return text

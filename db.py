@@ -114,8 +114,7 @@ def get_last_status_before(time_point: datetime) -> bool:
 def check_schedule_updated(last_update_time: datetime) -> bool:
     """Check if the outage schedule was updated based on the last_update_time."""
     result = execute_query(
-        "SELECT MAX(registry_update_time) FROM outage_schedule",
-        fetch=True
+        "SELECT MAX(registry_update_time) FROM outage_schedule", fetch=True
     )
     if result and result[0][0]:
         latest_update_time = result[0][0]
@@ -127,8 +126,10 @@ def update_outage_schedule(schedule_entries: List[Tuple[datetime, datetime]]):
     """Update the outage schedule in the database."""
     try:
         with connect_to_db() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM outage_schedule WHERE time >= %s",
-                        (datetime.now(UTC_PLUS_2),))
+            cur.execute(
+                "DELETE FROM outage_schedule WHERE time >= %s",
+                (datetime.now(UTC_PLUS_2),),
+            )
             insert_query = "INSERT INTO outage_schedule (time, registry_update_time) VALUES (%s, %s)"
             cur.executemany(insert_query, schedule_entries)
             conn.commit()

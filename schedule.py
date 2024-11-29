@@ -8,9 +8,12 @@ import requests
 from loguru import logger
 
 from config import CHECK_INTERVAL, GROUP_ID, UTC_PLUS_2
-from db import (check_schedule_updated, init_outage_schedule_table,
-                update_outage_schedule)
-from tg import format_duration, send_telegram_message
+from db import (
+    check_schedule_updated,
+    init_outage_schedule_table,
+    update_outage_schedule,
+)
+from tg import escape_markdown_v2, format_duration, send_telegram_message
 
 
 def fetch_schedule() -> Tuple[List[Dict], datetime]:
@@ -28,14 +31,13 @@ def fetch_schedule() -> Tuple[List[Dict], datetime]:
     group_number = GROUP_ID
     schedules = []
 
-    for day_label, days_ahead in [('today', 0), ('tomorrow', 1)]:
+    for day_label, days_ahead in [("today", 0), ("tomorrow", 1)]:
         date = current_time.date() + timedelta(days=days_ahead)
         schedule_data = extract_schedule_data(data, day_label, group_number)
         if schedule_data:
             schedules.extend(process_schedule(schedule_data, date))
         else:
-            logger.warning(
-                f"{day_label.capitalize()}'s schedule is not available.")
+            logger.warning(f"{day_label.capitalize()}'s schedule is not available.")
 
     registry_update_time = extract_registry_update_time(data)
     return schedules, registry_update_time
@@ -44,7 +46,9 @@ def fetch_schedule() -> Tuple[List[Dict], datetime]:
 def extract_schedule_data(data: Dict, day_label: str, group_number: int) -> List[Dict]:
     """Extract schedule data for a specific day."""
     try:
-        return data['components'][4]['dailySchedule']['kiev'][day_label]['groups'][group_number]
+        return data["components"][4]["dailySchedule"]["kiev"][day_label]["groups"][
+            group_number
+        ]
     except (KeyError, IndexError):
         return []
 
@@ -52,7 +56,7 @@ def extract_schedule_data(data: Dict, day_label: str, group_number: int) -> List
 def extract_registry_update_time(data: Dict) -> datetime:
     """Extract the last registry update time."""
     try:
-        timestamp = data['components'][4]['lastRegistryUpdateTime']
+        timestamp = data["components"][4]["lastRegistryUpdateTime"]
         return datetime.fromtimestamp(timestamp, UTC_PLUS_2)
     except (KeyError, ValueError):
         return datetime.min.replace(tzinfo=UTC_PLUS_2)
@@ -62,46 +66,41 @@ def process_schedule(schedule_data: List[Dict], date: datetime.date) -> List[Dic
     """Process schedule data and include only future outages."""
     schedule = []
     for interval in schedule_data:
-        if interval.get('type') != 'DEFINITE_OUTAGE':
+        if interval.get("type") != "DEFINITE_OUTAGE":
             continue
 
-        start_hour = interval['start']
-        time_slot = datetime(date.year, date.month, date.day,
-                             start_hour, tzinfo=UTC_PLUS_2)
+        start_hour = interval["start"]
+        time_slot = datetime(
+            date.year, date.month, date.day, start_hour, tzinfo=UTC_PLUS_2
+        )
         if time_slot < datetime.now(UTC_PLUS_2):
             continue
 
-        schedule.append({
-            'start': time_slot,
-            'end': time_slot + timedelta(hours=1),
-        })
+        schedule.append(
+            {
+                "start": time_slot,
+                "end": time_slot + timedelta(hours=1),
+            }
+        )
     return schedule
 
 
 def group_and_merge_intervals(intervals: List[Dict]) -> Dict[datetime.date, List[Dict]]:
     """Group intervals by date and merge consecutive intervals."""
-    intervals.sort(key=lambda x: x['start'])
+    intervals.sort(key=lambda x: x["start"])
     grouped = {}
 
     for interval in intervals:
-        date_key = interval['start'].date()
+        date_key = interval["start"].date()
         grouped.setdefault(date_key, [])
         day_intervals = grouped[date_key]
 
-        if day_intervals and interval['start'] == day_intervals[-1]['end']:
-            day_intervals[-1]['end'] = interval['end']
+        if day_intervals and interval["start"] == day_intervals[-1]["end"]:
+            day_intervals[-1]["end"] = interval["end"]
         else:
             day_intervals.append(interval)
 
     return grouped
-
-
-def escape_markdown_v2(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2."""
-    special_chars = r"_*[]()~`>#+-=|{}.!"
-    for char in special_chars:
-        text = text.replace(char, f"\\{char}")
-    return text
 
 
 def build_message(intervals: List[Dict], registry_update_time: datetime) -> str:
@@ -121,9 +120,9 @@ def build_message(intervals: List[Dict], registry_update_time: datetime) -> str:
         date_str = date.strftime("на *%d\\.%m\\.%Y*")
         message_lines.append(f"\n{date_str}")
         for interval in intervals:
-            start_str = interval['start'].strftime("%H:%M")
-            end_str = interval['end'].strftime("%H:%M")
-            duration_str = format_duration(interval['end'] - interval['start'])
+            start_str = interval["start"].strftime("%H:%M")
+            end_str = interval["end"].strftime("%H:%M")
+            duration_str = format_duration(interval["end"] - interval["start"])
             line = f"▪️ {start_str} - {end_str}  [{duration_str}]"
             message_lines.append(escape_markdown_v2(line))
 
@@ -140,14 +139,15 @@ def update_and_notify():
 
     if check_schedule_updated(registry_update_time):
         logger.info("Schedule update detected. Updating the database.")
-        schedule_data = [(entry['start'], registry_update_time)
-                         for entry in schedule_entries]
+        schedule_data = [
+            (entry["start"], registry_update_time) for entry in schedule_entries
+        ]
         update_outage_schedule(schedule_data)
 
         message = build_message(schedule_entries, registry_update_time)
         if message:
             logger.debug(f"Sending message:\n{message}")
-            send_telegram_message(message, parse_mode='MarkdownV2')
+            send_telegram_message(message, parse_mode="MarkdownV2")
         logger.info("Schedule updated and message sent.")
     else:
         logger.info("No new schedule data available.")
