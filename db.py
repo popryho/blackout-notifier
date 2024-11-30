@@ -94,7 +94,9 @@ def outage_schedule_outdated(schedule_entries: List[Tuple[datetime]]) -> bool:
         (datetime.now(UTC_PLUS_2),),
         fetch=True
     )
-    return set(schedule_entries) != set(result) if result else True
+    if result is None:
+        return True
+    return set(schedule_entries) != set(result)
 
 
 def outage_schedule_update(schedule_entries: List[Tuple[datetime]]):
