@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 from loguru import logger
 
 from config import CHECK_INTERVAL, HOST_TO_MONITOR, UTC_PLUS_2
-from db import get_last_status, get_total_time, init_host_status_table, save_status
+from db import (
+    host_status_get_last_status,
+    host_status_get_total_time,
+    host_status_init,
+    host_status_save_status,
+)
 from tg import format_duration, send_telegram_message
 
 
@@ -37,22 +42,22 @@ def create_status_message(is_up: bool, duration: timedelta) -> str:
 
 def main():
     """Main monitoring loop."""
-    init_host_status_table()
+    host_status_init()
 
-    last_status = get_last_status()
+    last_status = host_status_get_last_status()
 
     while True:
         current_status = ping_host(HOST_TO_MONITOR)
 
         if last_status is None:
             # Initial status
-            save_status(current_status)
+            host_status_save_status(current_status)
             status_str = "UP" if current_status else "DOWN"
             logger.info(f"Host {HOST_TO_MONITOR} initial status is {status_str}")
         elif current_status != last_status:
             # Status changed
-            save_status(current_status)
-            total_time = get_total_time(last_status)
+            host_status_save_status(current_status)
+            total_time = host_status_get_total_time(last_status)
             if total_time is None:
                 total_time = timedelta()
             message = create_status_message(current_status, total_time)

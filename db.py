@@ -35,7 +35,7 @@ def execute_query(query: str, params=None, fetch: bool = False):
         return None
 
 
-def init_host_status_table():
+def host_status_init():
     """Initialize the host_status table."""
     query = """
         CREATE TABLE IF NOT EXISTS host_status (
@@ -48,7 +48,7 @@ def init_host_status_table():
     logger.info("host_status table initialized.")
 
 
-def init_outage_schedule_table():
+def outage_schedule_init():
     """Initialize the outage_schedule table."""
     query = """
         CREATE TABLE IF NOT EXISTS outage_schedule (
@@ -61,7 +61,7 @@ def init_outage_schedule_table():
     logger.info("outage_schedule table initialized.")
 
 
-def save_status(status: bool):
+def host_status_save_status(status: bool):
     """Save the current status."""
     execute_query(
         "INSERT INTO host_status (status, time) VALUES (%s, %s)",
@@ -70,7 +70,7 @@ def save_status(status: bool):
     logger.info(f"Status {'UP' if status else 'DOWN'} saved.")
 
 
-def get_last_status() -> Optional[bool]:
+def host_status_get_last_status() -> Optional[bool]:
     """Get the most recent status."""
     result = execute_query(
         "SELECT status FROM host_status ORDER BY id DESC LIMIT 1", fetch=True
@@ -78,7 +78,7 @@ def get_last_status() -> Optional[bool]:
     return result[0][0] if result else None
 
 
-def get_total_time(previous_status: bool) -> Optional[timedelta]:
+def host_status_get_total_time(previous_status: bool) -> Optional[timedelta]:
     """Calculate total time since the last status change."""
     result = execute_query(
         "SELECT time FROM host_status WHERE status = %s ORDER BY id DESC LIMIT 1",
@@ -91,27 +91,7 @@ def get_total_time(previous_status: bool) -> Optional[timedelta]:
     return None
 
 
-def get_status_changes(start: datetime, end: datetime) -> List[Tuple[bool, datetime]]:
-    """Retrieve status changes between two timestamps."""
-    result = execute_query(
-        "SELECT status, time FROM host_status WHERE time BETWEEN %s AND %s ORDER BY time",
-        (start, end),
-        fetch=True,
-    )
-    return result if result else []
-
-
-def get_last_status_before(time_point: datetime) -> bool:
-    """Get the last status before a specific time."""
-    result = execute_query(
-        "SELECT status FROM host_status WHERE time < %s ORDER BY time DESC LIMIT 1",
-        (time_point,),
-        fetch=True,
-    )
-    return result[0][0] if result else True
-
-
-def check_schedule_updated(last_update_time: datetime) -> bool:
+def outage_schedule_outdated(last_update_time: datetime) -> bool:
     """Check if the outage schedule was updated based on the last_update_time."""
     result = execute_query(
         "SELECT MAX(registry_update_time) FROM outage_schedule", fetch=True
@@ -122,7 +102,7 @@ def check_schedule_updated(last_update_time: datetime) -> bool:
     return True  # No existing schedule, needs to update
 
 
-def update_outage_schedule(schedule_entries: List[Tuple[datetime, datetime]]):
+def outage_schedule_update(schedule_entries: List[Tuple[datetime, datetime]]):
     """Update the outage schedule in the database."""
     try:
         with connect_to_db() as conn, conn.cursor() as cur:
@@ -136,3 +116,23 @@ def update_outage_schedule(schedule_entries: List[Tuple[datetime, datetime]]):
         logger.info("Outage schedule updated.")
     except Exception as e:
         logger.error(f"Error updating outage schedule: {e}")
+
+
+def host_status_get_status_changes(start: datetime, end: datetime) -> List[Tuple[bool, datetime]]:
+    """Retrieve status changes between two timestamps."""
+    result = execute_query(
+        "SELECT status, time FROM host_status WHERE time BETWEEN %s AND %s ORDER BY time",
+        (start, end),
+        fetch=True,
+    )
+    return result if result else []
+
+
+def host_status_get_last_status_before(time_point: datetime) -> bool:
+    """Get the last status before a specific time."""
+    result = execute_query(
+        "SELECT status FROM host_status WHERE time < %s ORDER BY time DESC LIMIT 1",
+        (time_point,),
+        fetch=True,
+    )
+    return result[0][0] if result else True

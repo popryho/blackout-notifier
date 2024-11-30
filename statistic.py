@@ -6,7 +6,11 @@ from typing import Tuple
 from loguru import logger
 
 from config import UTC_PLUS_2
-from db import get_last_status_before, get_status_changes, init_host_status_table
+from db import (
+    host_status_get_last_status_before,
+    host_status_get_status_changes,
+    host_status_init,
+)
 from tg import format_duration, send_telegram_message
 
 
@@ -49,8 +53,8 @@ def calculate_total_times(
     start_time: datetime, end_time: datetime
 ) -> Tuple[timedelta, timedelta]:
     """Calculate total on and off times within the specified time range."""
-    rows = get_status_changes(start_time, end_time)
-    previous_status = get_last_status_before(start_time)
+    rows = host_status_get_status_changes(start_time, end_time)
+    previous_status = host_status_get_last_status_before(start_time)
     total_on_time = timedelta()
     total_off_time = timedelta()
     previous_time = start_time
@@ -104,7 +108,7 @@ def send_daily_statistics() -> None:
 
 def main() -> None:
     """Main function to execute the daily statistics reporting."""
-    init_host_status_table()
+    host_status_init()
     logger.info("Starting daily statistics reporting.")
     send_daily_statistics()
     logger.info("Daily statistics reporting completed.")

@@ -8,11 +8,7 @@ import requests
 from loguru import logger
 
 from config import CHECK_INTERVAL, GROUP_ID, UTC_PLUS_2
-from db import (
-    check_schedule_updated,
-    init_outage_schedule_table,
-    update_outage_schedule,
-)
+from db import outage_schedule_init, outage_schedule_outdated, outage_schedule_update
 from tg import escape_markdown_v2, format_duration, send_telegram_message
 
 
@@ -136,12 +132,12 @@ def update_and_notify():
         # Failed to fetch schedule
         return
 
-    if check_schedule_updated(registry_update_time):
+    if outage_schedule_outdated(registry_update_time):
         logger.info("Schedule update detected. Updating the database.")
         schedule_data = [
             (entry["start"], registry_update_time) for entry in schedule_entries
         ]
-        update_outage_schedule(schedule_data)
+        outage_schedule_update(schedule_data)
 
         message = build_message(schedule_entries, registry_update_time)
         if message:
@@ -153,7 +149,7 @@ def update_and_notify():
 
 def main():
     """Main function to initialize and periodically fetch schedule."""
-    init_outage_schedule_table()
+    outage_schedule_init()
 
     while True:
         update_and_notify()
