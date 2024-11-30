@@ -33,7 +33,7 @@ def fetch_schedule() -> List[Dict]:
         if schedule_data:
             schedules.extend(process_schedule(schedule_data, date))
         else:
-            logger.warning(f"{day_label.capitalize()}'s schedule is not available.")
+            logger.warning(f"{day_label.capitalize()}'s outage schedule is empty.")
 
     return schedules
 
@@ -45,6 +45,7 @@ def extract_schedule_data(data: Dict, day_label: str, group_number: int) -> List
             group_number
         ]
     except (KeyError, IndexError):
+        logger.warning(f"{day_label.capitalize()}'s schedule is not available.")
         return []
 
 
