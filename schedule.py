@@ -2,7 +2,7 @@
 
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import requests
 from loguru import logger
@@ -12,7 +12,7 @@ from db import outage_schedule_init, outage_schedule_outdated, outage_schedule_u
 from tg import escape_markdown_v2, format_duration, send_telegram_message
 
 
-def fetch_schedule() -> Tuple[List[Dict], datetime]:
+def fetch_schedule() -> List[Dict]:
     """Fetch the schedule from the API and return processed data."""
     url = "https://api.yasno.com.ua/api/v1/pages/home/schedule-turn-off-electricity"
     current_time = datetime.now(UTC_PLUS_2)
@@ -22,7 +22,7 @@ def fetch_schedule() -> Tuple[List[Dict], datetime]:
         data = response.json()
     except Exception as e:
         logger.error(f"Error fetching schedule: {e}")
-        return [], datetime.min.replace(tzinfo=UTC_PLUS_2)
+        return []
 
     group_number = GROUP_ID
     schedules = []
@@ -35,8 +35,7 @@ def fetch_schedule() -> Tuple[List[Dict], datetime]:
         else:
             logger.warning(f"{day_label.capitalize()}'s schedule is not available.")
 
-    registry_update_time = extract_registry_update_time(data)
-    return schedules, registry_update_time
+    return schedules
 
 
 def extract_schedule_data(data: Dict, day_label: str, group_number: int) -> List[Dict]:
@@ -47,15 +46,6 @@ def extract_schedule_data(data: Dict, day_label: str, group_number: int) -> List
         ]
     except (KeyError, IndexError):
         return []
-
-
-def extract_registry_update_time(data: Dict) -> datetime:
-    """Extract the last registry update time."""
-    try:
-        timestamp = data["components"][4]["lastRegistryUpdateTime"]
-        return datetime.fromtimestamp(timestamp, UTC_PLUS_2)
-    except (KeyError, ValueError):
-        return datetime.min.replace(tzinfo=UTC_PLUS_2)
 
 
 def process_schedule(schedule_data: List[Dict], date: datetime.date) -> List[Dict]:
@@ -99,17 +89,20 @@ def group_and_merge_intervals(intervals: List[Dict]) -> Dict[datetime.date, List
     return grouped
 
 
-def build_message(intervals: List[Dict], registry_update_time: datetime) -> str:
+def build_message(intervals: List[Dict]) -> str:
     """Construct a Telegram message based on intervals."""
-    if not intervals:
-        return ""
-
-    grouped_intervals = group_and_merge_intervals(intervals)
+    current_time_str = datetime.now(UTC_PLUS_2).strftime('%d.%m.%Y %H:%M')
     header = (
         f"🗓️ Графік відключень, {GROUP_ID} група\n"
-        f"🔄 Оновлено: {escape_markdown_v2(registry_update_time.strftime('%d.%m.%Y %H:%M'))}"
+        f"🔄 Оновлено: {escape_markdown_v2(current_time_str)}"
     )
     message_lines = [header]
+
+    if not intervals:
+        message_lines.append("▪️ Наразі незаплановано")
+        return "\n".join(message_lines)
+
+    grouped_intervals = group_and_merge_intervals(intervals)
 
     for date, intervals in sorted(grouped_intervals.items()):
         date_str = date.strftime("на *%d\\.%m\\.%Y*")
@@ -126,20 +119,15 @@ def build_message(intervals: List[Dict], registry_update_time: datetime) -> str:
 
 def update_and_notify():
     """Fetch schedule, update database, and send notifications."""
-    schedule_entries, registry_update_time = fetch_schedule()
+    schedule_entries = fetch_schedule()
 
-    if registry_update_time == datetime.min.replace(tzinfo=UTC_PLUS_2):
-        # Failed to fetch schedule
-        return
+    formatted_schedule_entries = [(entry["start"],) for entry in schedule_entries]
 
-    if outage_schedule_outdated(registry_update_time):
+    if outage_schedule_outdated(formatted_schedule_entries):
         logger.info("Schedule update detected. Updating the database.")
-        schedule_data = [
-            (entry["start"], registry_update_time) for entry in schedule_entries
-        ]
-        outage_schedule_update(schedule_data)
+        outage_schedule_update(formatted_schedule_entries)
 
-        message = build_message(schedule_entries, registry_update_time)
+        message = build_message(schedule_entries)
         if message:
             send_telegram_message(message, parse_mode="MarkdownV2")
         logger.info("Schedule updated and message sent.")

@@ -53,8 +53,7 @@ def outage_schedule_init():
     query = """
         CREATE TABLE IF NOT EXISTS outage_schedule (
             id BIGSERIAL PRIMARY KEY,
-            time TIMESTAMPTZ NOT NULL UNIQUE,
-            registry_update_time TIMESTAMPTZ NOT NULL
+            time TIMESTAMPTZ NOT NULL UNIQUE
         )
     """
     execute_query(query)
@@ -85,24 +84,20 @@ def host_status_get_total_time(previous_status: bool) -> Optional[timedelta]:
         (previous_status,),
         fetch=True,
     )
-    if result:
-        last_change_time = result[0][0]
-        return datetime.now(UTC_PLUS_2) - last_change_time
-    return None
+    return datetime.now(UTC_PLUS_2) - result[0][0] if result else None
 
 
-def outage_schedule_outdated(last_update_time: datetime) -> bool:
-    """Check if the outage schedule was updated based on the last_update_time."""
+def outage_schedule_outdated(schedule_entries: List[Tuple[datetime]]) -> bool:
+    """Check if the fetched schedule differs from the existing schedule in the database."""
     result = execute_query(
-        "SELECT MAX(registry_update_time) FROM outage_schedule", fetch=True
+        "SELECT time FROM outage_schedule WHERE time >= %s",
+        (datetime.now(UTC_PLUS_2),),
+        fetch=True
     )
-    if result and result[0][0]:
-        latest_update_time = result[0][0]
-        return last_update_time > latest_update_time
-    return True  # No existing schedule, needs to update
+    return set(schedule_entries) != set(result) if result else True
 
 
-def outage_schedule_update(schedule_entries: List[Tuple[datetime, datetime]]):
+def outage_schedule_update(schedule_entries: List[Tuple[datetime]]):
     """Update the outage schedule in the database."""
     try:
         with connect_to_db() as conn, conn.cursor() as cur:
@@ -110,7 +105,7 @@ def outage_schedule_update(schedule_entries: List[Tuple[datetime, datetime]]):
                 "DELETE FROM outage_schedule WHERE time >= %s",
                 (datetime.now(UTC_PLUS_2),),
             )
-            insert_query = "INSERT INTO outage_schedule (time, registry_update_time) VALUES (%s, %s)"
+            insert_query = "INSERT INTO outage_schedule (time) VALUES (%s)"
             cur.executemany(insert_query, schedule_entries)
             conn.commit()
         logger.info("Outage schedule updated.")
