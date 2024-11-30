@@ -82,7 +82,7 @@ def host_status_get_total_time(previous_status: bool) -> Optional[timedelta]:
     """Calculate total time since the last status change."""
     result = execute_query(
         "SELECT time FROM host_status WHERE status = %s ORDER BY id DESC LIMIT 1",
-        (not previous_status,),
+        (previous_status,),
         fetch=True,
     )
     if result:
