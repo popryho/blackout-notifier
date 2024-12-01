@@ -17,6 +17,9 @@ def fetch_schedule() -> List[Dict]:
     url = "https://api.yasno.com.ua/api/v1/pages/home/schedule-turn-off-electricity"
     current_time = datetime.now(UTC_PLUS_2)
 
+    if current_time.time() < (datetime.min + timedelta(minutes=5)).time():
+        logger.info("Skipping schedule fetching due to the time of the day.")
+        time.sleep(300)
     try:
         response = requests.get(url)
         data = response.json()
