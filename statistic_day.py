@@ -7,8 +7,8 @@ from loguru import logger
 
 from config import UTC_PLUS_2
 from db import (
+    host_status_get_changes_between,
     host_status_get_last_status_before,
-    host_status_get_status_changes,
     host_status_init,
 )
 from tg import format_duration, send_telegram_message
@@ -53,7 +53,7 @@ def calculate_total_times(
     start_time: datetime, end_time: datetime
 ) -> Tuple[timedelta, timedelta]:
     """Calculate total on and off times within the specified time range."""
-    rows = host_status_get_status_changes(start_time, end_time)
+    rows = host_status_get_changes_between(start_time, end_time)
     previous_status = host_status_get_last_status_before(start_time)
     total_on_time = timedelta()
     total_off_time = timedelta()
@@ -87,10 +87,12 @@ def calculate_total_times(
     remaining_duration = end_time - previous_time
     if previous_status:
         total_on_time += remaining_duration
-        logger.debug(f"Adding remaining {remaining_duration} to total on time.")
+        logger.debug(f"Adding remaining {
+                     remaining_duration} to total on time.")
     else:
         total_off_time += remaining_duration
-        logger.debug(f"Adding remaining {remaining_duration} to total off time.")
+        logger.debug(f"Adding remaining {
+                     remaining_duration} to total off time.")
 
     return total_on_time, total_off_time
 
@@ -100,7 +102,8 @@ def send_daily_statistics() -> None:
     start_of_day, end_of_day = get_time_range_for_yesterday()
     date_str = start_of_day.strftime("%Y-%m-%d")
 
-    total_on_time, total_off_time = calculate_total_times(start_of_day, end_of_day)
+    total_on_time, total_off_time = calculate_total_times(
+        start_of_day, end_of_day)
 
     message = build_message(date_str, total_on_time, total_off_time)
     send_telegram_message(message)
