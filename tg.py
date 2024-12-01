@@ -1,19 +1,25 @@
 # utils.py
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import requests
 from loguru import logger
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UTC_PLUS_2
 
 
 def send_telegram_message(message: str, parse_mode: str = None) -> None:
-    """Send a message via Telegram Bot API."""
+    """Send a message via Telegram Bot API with night-hour silent mode."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+
+    current_hour = datetime.now(UTC_PLUS_2).hour
+    if 23 <= current_hour or current_hour < 7:
+        data["disable_notification"] = True
+
     if parse_mode:
         data["parse_mode"] = parse_mode
+
     try:
         response = requests.post(url, data=data)
         response.raise_for_status()
