@@ -95,7 +95,7 @@ def group_and_merge_intervals(intervals: List[Dict]) -> Dict[datetime.date, List
 
 def build_message(intervals: List[Dict]) -> str:
     """Construct a Telegram message based on intervals."""
-    current_time_str = datetime.now(UTC_PLUS_2).strftime('%d.%m.%Y %H:%M')
+    current_time_str = datetime.now(UTC_PLUS_2).strftime("%d.%m.%Y %H:%M")
     header = (
         f"🗓️ Графік відключень, {GROUP_ID} група\n"
         f"🔄 Оновлено: {escape_markdown_v2(current_time_str)}"

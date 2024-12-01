@@ -46,3 +46,32 @@ def escape_markdown_v2(text: str) -> str:
     for char in special_chars:
         text = text.replace(char, f"\\{char}")
     return text
+
+
+def send_telegram_image(
+    image_path: str, caption: str = None, parse_mode: str = None
+) -> None:
+    """Send an image to a Telegram chat via the Bot API with optional caption and silent mode during night hours."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    data = {"chat_id": TELEGRAM_CHAT_ID}
+
+    # Night-hour silent mode
+    current_hour = datetime.now(UTC_PLUS_2).hour
+    if 23 <= current_hour or current_hour < 7:
+        data["disable_notification"] = True
+
+    if caption:
+        data["caption"] = caption
+    if parse_mode:
+        data["parse_mode"] = parse_mode
+
+    try:
+        with open(image_path, "rb") as photo_file:
+            files = {"photo": photo_file}
+            response = requests.post(url, data=data, files=files)
+            response.raise_for_status()
+            logger.info("Telegram image sent successfully.")
+    except FileNotFoundError:
+        logger.error(f"Image file not found: {image_path}")
+    except requests.RequestException as e:
+        logger.error(f"Failed to send Telegram image: {e}")

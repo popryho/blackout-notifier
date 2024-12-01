@@ -1,4 +1,4 @@
-# statistic.py
+# statistic_day.py
 
 from datetime import datetime, timedelta
 from typing import Tuple
@@ -72,7 +72,7 @@ def calculate_total_times(
             logger.debug(f"No status changes. Total off time: {duration}")
         return total_on_time, total_off_time
 
-    for status, time_dt in rows:
+    for time_dt, status in rows:
         duration = time_dt - previous_time
         if previous_status:
             total_on_time += duration
@@ -87,12 +87,10 @@ def calculate_total_times(
     remaining_duration = end_time - previous_time
     if previous_status:
         total_on_time += remaining_duration
-        logger.debug(f"Adding remaining {
-                     remaining_duration} to total on time.")
+        logger.debug(f"Adding remaining {remaining_duration} to total on time.")
     else:
         total_off_time += remaining_duration
-        logger.debug(f"Adding remaining {
-                     remaining_duration} to total off time.")
+        logger.debug(f"Adding remaining {remaining_duration} to total off time.")
 
     return total_on_time, total_off_time
 
@@ -102,8 +100,7 @@ def send_daily_statistics() -> None:
     start_of_day, end_of_day = get_time_range_for_yesterday()
     date_str = start_of_day.strftime("%Y-%m-%d")
 
-    total_on_time, total_off_time = calculate_total_times(
-        start_of_day, end_of_day)
+    total_on_time, total_off_time = calculate_total_times(start_of_day, end_of_day)
 
     message = build_message(date_str, total_on_time, total_off_time)
     send_telegram_message(message)

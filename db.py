@@ -92,7 +92,7 @@ def outage_schedule_outdated(schedule_entries: List[Tuple[datetime]]) -> bool:
     result = execute_query(
         "SELECT time FROM outage_schedule WHERE time >= %s",
         (datetime.now(UTC_PLUS_2),),
-        fetch=True
+        fetch=True,
     )
     if result is None:
         return True
@@ -115,17 +115,21 @@ def outage_schedule_update(schedule_entries: List[Tuple[datetime]]):
         logger.error(f"Error updating outage schedule: {e}")
 
 
-def host_status_get_changes_between(start: datetime, end: datetime) -> List[Tuple[bool, datetime]]:
+def host_status_get_changes_between(
+    start: datetime, end: datetime
+) -> List[Tuple[datetime, bool]]:
     """Retrieve status changes between two timestamps."""
     result = execute_query(
-        "SELECT status, time FROM host_status WHERE time BETWEEN %s AND %s ORDER BY time",
+        "SELECT time, status FROM host_status WHERE time BETWEEN %s AND %s ORDER BY time",
         (start, end),
         fetch=True,
     )
     return result if result else []
 
 
-def outage_schedule_get_between(start: datetime, end: datetime) -> List[Tuple[datetime]]:
+def outage_schedule_get_between(
+    start: datetime, end: datetime
+) -> List[Tuple[datetime]]:
     """Retrieve outage schedules between two timestamps."""
     result = execute_query(
         "SELECT time FROM outage_schedule WHERE time BETWEEN %s AND %s ORDER BY time",
