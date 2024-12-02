@@ -272,7 +272,7 @@ def main():
     outage_schedule_init()
 
     now = datetime.now(UTC_PLUS_2)
-    start_of_week = (now - timedelta(days=now.weekday())).replace(
+    start_of_week = (now - timedelta(weeks=1, days=now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
 
