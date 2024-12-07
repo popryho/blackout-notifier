@@ -1,12 +1,11 @@
 # ping.py
-
-import subprocess
+import socket
 import time
 from datetime import datetime, timedelta
 
 from loguru import logger
 
-from config import CHECK_INTERVAL, HOST_TO_MONITOR, UTC_PLUS_2
+from config import CHECK_INTERVAL, HOST_TO_MONITOR, PORT_TO_MONITOR, UTC_PLUS_2
 from db import (
     host_status_get_last_status,
     host_status_get_total_time,
@@ -16,17 +15,15 @@ from db import (
 from tg import format_duration, send_telegram_message
 
 
-def ping_host(host: str) -> bool:
-    """Ping the specified host to check its status."""
+def is_server_available(host: str, port: int, timeout: int = 5) -> bool:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
     try:
-        result = subprocess.run(
-            ["ping", "-c", "20", "-W", "1", host],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return result.returncode == 0
+        s.connect((host, port))
+        s.close()
+        return True
     except Exception as e:
-        logger.error(f"Error pinging host {host}: {e}")
+        logger.error(f"Error checking host {host}: {e}")
         return False
 
 
@@ -47,13 +44,15 @@ def main():
     last_status = host_status_get_last_status()
 
     while True:
-        current_status = ping_host(HOST_TO_MONITOR)
+        current_status = is_server_available(HOST_TO_MONITOR, PORT_TO_MONITOR)
 
         if last_status is None:
             # Initial status
             host_status_save_status(current_status)
             status_str = "UP" if current_status else "DOWN"
-            logger.info(f"Host {HOST_TO_MONITOR} initial status is {status_str}")
+            logger.info(f"Host {HOST_TO_MONITOR}:{PORT_TO_MONITOR}"
+                        f"initial status is {status_str}")
+            last_status = current_status
         elif current_status != last_status:
             # Status changed
             host_status_save_status(current_status)
