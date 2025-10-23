@@ -2,13 +2,13 @@
 import socket
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import Enum
 from typing import Optional
 
 from loguru import logger
 
-from config import CHECK_INTERVAL, HOST_TO_MONITOR, PORT_TO_MONITOR, UTC_PLUS_2
+from config import CHECK_INTERVAL, HOST_TO_MONITOR, PORT_TO_MONITOR
 from db import (
     HostStatusRepository,
     get_database_manager,
@@ -62,7 +62,6 @@ class StatusChange:
 
     new_status: bool
     duration: timedelta
-    timestamp: datetime
 
     @property
     def is_up(self) -> bool:
@@ -111,13 +110,12 @@ class MessageBuilder:
     @staticmethod
     def create_status_message(status_change: StatusChange) -> str:
         """Create a status change message."""
-        current_time = status_change.timestamp.strftime("%H:%M")
         duration_str = format_duration(status_change.duration)
 
         if status_change.is_up:
-            return f"🟢 {current_time} Світло з'явилося\n🕓 Його не було {duration_str}"
+            return f"🟢 Світло з'явилося\n🕓 Його не було {duration_str}"
         else:
-            return f"🔴 {current_time} Світло зникло\n🕓 Воно було {duration_str}"
+            return f"🔴 Світло зникло\n🕓 Воно було {duration_str}"
 
 
 class HostMonitor:
@@ -189,7 +187,6 @@ class HostMonitor:
             status_change = StatusChange(
                 new_status=current_status,
                 duration=duration,
-                timestamp=datetime.now(UTC_PLUS_2),
             )
 
             message = self.message_builder.create_status_message(status_change)
