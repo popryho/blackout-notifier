@@ -297,7 +297,14 @@ class ScheduleUpdateTrackerRepository(BaseRepository):
         """Check if schedule was updated."""
         query = f"SELECT last_updated FROM {self.table_name} ORDER BY id DESC LIMIT 1"
         result = self.db_manager.execute_query(query, fetch=True)
-        if not result or new_datetime_str != result[0][0]:
+        if not result:
+            logger.info("No last updated datetime found in database.")
+            return True
+
+        new_datetime = datetime.fromisoformat(new_datetime_str)
+        stored_datetime = result[0][0]        
+        if new_datetime != stored_datetime:
+            logger.info("Schedule was updated since last check. Updating database.")
             return True
         return False
 
