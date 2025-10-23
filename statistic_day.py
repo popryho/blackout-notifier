@@ -7,9 +7,8 @@ from loguru import logger
 
 from config import UTC_PLUS_2
 from db import (
-    host_status_get_changes_between,
-    host_status_get_last_status_before,
-    host_status_init,
+    HostStatusRepository,
+    get_database_manager,
 )
 from tg import format_duration, send_telegram_message
 
@@ -53,8 +52,11 @@ def calculate_total_times(
     start_time: datetime, end_time: datetime
 ) -> Tuple[timedelta, timedelta]:
     """Calculate total on and off times within the specified time range."""
-    rows = host_status_get_changes_between(start_time, end_time)
-    previous_status = host_status_get_last_status_before(start_time)
+    db_manager = get_database_manager()
+    host_status_repo = HostStatusRepository(db_manager)
+
+    rows = host_status_repo.get_changes_between(start_time, end_time)
+    previous_status = host_status_repo.get_last_status_before(start_time)
     total_on_time = timedelta()
     total_off_time = timedelta()
     previous_time = start_time
@@ -108,7 +110,10 @@ def send_daily_statistics() -> None:
 
 def main() -> None:
     """Main function to execute the daily statistics reporting."""
-    host_status_init()
+    db_manager = get_database_manager()
+    host_status_repo = HostStatusRepository(db_manager)
+    host_status_repo.initialize_table()
+
     logger.info("Starting daily statistics reporting.")
     send_daily_statistics()
     logger.info("Daily statistics reporting completed.")

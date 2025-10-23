@@ -10,11 +10,9 @@ from loguru import logger
 
 from config import UTC_PLUS_2
 from db import (
-    host_status_get_changes_between,
-    host_status_get_last_status_before,
-    host_status_init,
-    outage_schedule_get_between,
-    outage_schedule_init,
+    HostStatusRepository,
+    OutageScheduleRepository,
+    get_database_manager,
 )
 from tg import send_telegram_image
 
@@ -69,8 +67,11 @@ def host_status_get_intervals_by_day(
     start_time: datetime,
 ) -> Dict[str, List[Tuple[datetime, bool]]]:
     """Retrieve host status intervals for each day starting from start_time over a week."""
-    status_at_start = host_status_get_last_status_before(start_time)
-    all_changes = host_status_get_changes_between(
+    db_manager = get_database_manager()
+    host_status_repo = HostStatusRepository(db_manager)
+
+    status_at_start = host_status_repo.get_last_status_before(start_time)
+    all_changes = host_status_repo.get_changes_between(
         start_time, start_time + timedelta(days=7)
     )
     events = [(start_time, status_at_start)] + [
@@ -106,8 +107,11 @@ def outage_schedule_get_intervals_by_day(
     start_time: datetime,
 ) -> Dict[str, List[Tuple[datetime, bool]]]:
     """Retrieve scheduled outage intervals for each day starting from start_time over a week."""
+    db_manager = get_database_manager()
+    outage_repo = OutageScheduleRepository(db_manager)
+
     # Get all outage entries in the week
-    outage_entries = outage_schedule_get_between(
+    outage_entries = outage_repo.get_schedule_between(
         start_time, start_time + timedelta(days=7)
     )
     outage_times = [entry[0].astimezone(UTC_PLUS_2) for entry in outage_entries]
@@ -268,8 +272,12 @@ def plot_weekly_intervals(
 
 
 def main():
-    host_status_init()
-    outage_schedule_init()
+    db_manager = get_database_manager()
+    host_status_repo = HostStatusRepository(db_manager)
+    outage_repo = OutageScheduleRepository(db_manager)
+
+    host_status_repo.initialize_table()
+    outage_repo.initialize_table()
 
     now = datetime.now(UTC_PLUS_2)
     start_of_week = (now - timedelta(weeks=1, days=now.weekday())).replace(
