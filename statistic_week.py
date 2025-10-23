@@ -3,18 +3,20 @@
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 from loguru import logger
 
-from config import UTC_PLUS_2
 from db import (
     HostStatusRepository,
     OutageScheduleRepository,
     get_database_manager,
 )
 from tg import send_telegram_image
+
+KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 DAYS_OF_WEEK = [
     "Monday",
@@ -75,7 +77,8 @@ def host_status_get_intervals_by_day(
         start_time, start_time + timedelta(days=7)
     )
     events = [(start_time, status_at_start)] + [
-        (timestamp.astimezone(UTC_PLUS_2), status) for timestamp, status in all_changes
+        (timestamp.astimezone(KYIV_TIMEZONE), status)
+        for timestamp, status in all_changes
     ]
     return split_events_by_day(start_time, events)
 
@@ -114,7 +117,7 @@ def outage_schedule_get_intervals_by_day(
     outage_entries = outage_repo.get_schedule_between(
         start_time, start_time + timedelta(days=7)
     )
-    outage_times = [entry[0].astimezone(UTC_PLUS_2) for entry in outage_entries]
+    outage_times = [entry[0].astimezone(KYIV_TIMEZONE) for entry in outage_entries]
 
     # Merge consecutive outages
     merged_outages = merge_consecutive_outages(outage_times)
@@ -279,7 +282,7 @@ def main():
     host_status_repo.initialize_table()
     outage_repo.initialize_table()
 
-    now = datetime.now(UTC_PLUS_2)
+    now = datetime.now(KYIV_TIMEZONE)
     start_of_week = (now - timedelta(weeks=1, days=now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0
     )

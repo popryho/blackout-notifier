@@ -1,11 +1,14 @@
 # utils.py
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UTC_PLUS_2
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 
 def send_telegram_message(message: str, parse_mode: str = None) -> None:
@@ -13,7 +16,7 @@ def send_telegram_message(message: str, parse_mode: str = None) -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
 
-    current_hour = datetime.now(UTC_PLUS_2).hour
+    current_hour = datetime.now(KYIV_TIMEZONE).hour
     if 23 <= current_hour or current_hour < 7:
         data["disable_notification"] = True
 
@@ -56,7 +59,7 @@ def send_telegram_image(
     data = {"chat_id": TELEGRAM_CHAT_ID}
 
     # Night-hour silent mode
-    current_hour = datetime.now(UTC_PLUS_2).hour
+    current_hour = datetime.now(KYIV_TIMEZONE).hour
     if 23 <= current_hour or current_hour < 7:
         data["disable_notification"] = True
 

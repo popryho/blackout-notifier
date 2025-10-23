@@ -5,13 +5,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import psycopg
 from loguru import logger
 from psycopg.conninfo import make_conninfo
 from psycopg.errors import OperationalError
 
-from config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER, UTC_PLUS_2
+from config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
+
+KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 
 class DatabaseError(Exception):
@@ -186,7 +189,7 @@ class HostStatusRepository(BaseRepository):
     def save_status(self, status: bool) -> None:
         """Save the current status."""
         query = f"INSERT INTO {self.table_name} (status, time) VALUES (%s, %s)"
-        self.db_manager.execute_query(query, (status, datetime.now(UTC_PLUS_2)))
+        self.db_manager.execute_query(query, (status, datetime.now(KYIV_TIMEZONE)))
         logger.info(f"Status {'UP' if status else 'DOWN'} saved.")
 
     def get_last_status(self) -> Optional[bool]:
@@ -199,7 +202,7 @@ class HostStatusRepository(BaseRepository):
         """Calculate total time since the last status change."""
         query = f"SELECT time FROM {self.table_name} WHERE status = %s ORDER BY id DESC LIMIT 1"
         result = self.db_manager.execute_query(query, (previous_status,), fetch=True)
-        return datetime.now(UTC_PLUS_2) - result[0][0] if result else None
+        return datetime.now(KYIV_TIMEZONE) - result[0][0] if result else None
 
     def get_changes_between(
         self, start: datetime, end: datetime
@@ -239,7 +242,7 @@ class OutageScheduleRepository(BaseRepository):
         """Check if the fetched schedule differs from the existing schedule in the database."""
         query = f"SELECT status, time FROM {self.table_name} WHERE time >= %s"
         result = self.db_manager.execute_query(
-            query, (datetime.now(UTC_PLUS_2),), fetch=True
+            query, (datetime.now(KYIV_TIMEZONE),), fetch=True
         )
         if result is None:
             return True
@@ -253,7 +256,7 @@ class OutageScheduleRepository(BaseRepository):
                     # Delete existing future entries
                     cur.execute(
                         f"DELETE FROM {self.table_name} WHERE time >= %s",
-                        (datetime.now(UTC_PLUS_2),),
+                        (datetime.now(KYIV_TIMEZONE),),
                     )
                     # Insert new entries
                     insert_query = (
@@ -302,7 +305,7 @@ class ScheduleUpdateTrackerRepository(BaseRepository):
             return True
 
         new_datetime = datetime.fromisoformat(new_datetime_str)
-        stored_datetime = result[0][0]        
+        stored_datetime = result[0][0]
         if new_datetime != stored_datetime:
             logger.info("Schedule was updated since last check. Updating database.")
             return True

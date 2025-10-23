@@ -2,20 +2,23 @@
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
 
-from config import CHECK_INTERVAL, DSO_ID, GROUP_ID, REGION_ID, UTC_PLUS_2
+from config import CHECK_INTERVAL, DSO_ID, GROUP_ID, REGION_ID
 from db import (
     OutageScheduleRepository,
     ScheduleUpdateTrackerRepository,
     get_database_manager,
 )
 from tg import escape_markdown_v2, format_duration, send_telegram_message
+
+KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 
 class SlotType(Enum):
@@ -88,7 +91,7 @@ class ScheduleFetcher:
 
     def _should_skip_early_morning(self) -> bool:
         """Check if we should skip fetching during early morning hours."""
-        current_time = datetime.now(UTC_PLUS_2)
+        current_time = datetime.now(KYIV_TIMEZONE)
         return current_time.time() < (datetime.min + EARLY_MORNING_THRESHOLD).time()
 
     def _build_api_url(self) -> str:
@@ -132,7 +135,7 @@ class ScheduleProcessor:
     """Handles processing of schedule data."""
 
     def __init__(self):
-        self.current_time = datetime.now(UTC_PLUS_2)
+        self.current_time = datetime.now(KYIV_TIMEZONE)
 
     def process_schedule_data(self, schedule_data: ScheduleData) -> List[ScheduleEntry]:
         """Process schedule data and return list of schedule entries."""
@@ -192,7 +195,7 @@ class ScheduleProcessor:
             date.day,
             hours,
             minutes,
-            tzinfo=UTC_PLUS_2,
+            tzinfo=KYIV_TIMEZONE,
         )
 
 
@@ -220,7 +223,11 @@ class MessageBuilder:
 
     def _build_header(self, updated_on: str) -> str:
         """Build the message header."""
-        formatted_time = datetime.fromisoformat(updated_on).strftime("%d.%m.%Y %H:%M")
+        dt = datetime.fromisoformat(updated_on)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        kyiv_time = dt.astimezone(KYIV_TIMEZONE)
+        formatted_time = kyiv_time.strftime("%d.%m.%Y %H:%M")
         return (
             f"🗓️ Графік відключень, {escape_markdown_v2(self.group_id)} група\n"
             f"🔄 Оновлено: {escape_markdown_v2(formatted_time)}"
