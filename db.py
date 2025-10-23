@@ -53,11 +53,44 @@ def outage_schedule_init():
     query = """
         CREATE TABLE IF NOT EXISTS outage_schedule (
             id BIGSERIAL PRIMARY KEY,
-            time TIMESTAMPTZ NOT NULL UNIQUE
+            status BOOLEAN NOT NULL DEFAULT TRUE,
+            time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """
     execute_query(query)
     logger.info("outage_schedule table initialized.")
+
+
+def schedule_update_tracker_init():
+    """Initialize the schedule_update_tracker table with one initial value."""
+    query = """
+        CREATE TABLE IF NOT EXISTS schedule_update_tracker (
+            id BIGSERIAL PRIMARY KEY,
+            last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """
+    execute_query(query)
+    logger.info("schedule_update_tracker table initialized.")
+
+
+def schedule_update_tracker_outdated(new_datetime_str: str) -> bool:
+    """Check if schedule was updated.
+    Returns True if schedule was updated (new datetime is different), False otherwise.
+    """
+    result = execute_query(
+        "SELECT last_updated FROM schedule_update_tracker ORDER BY id DESC LIMIT 1",
+        fetch=True,
+    )
+    if not result or new_datetime_str != result[0][0]:
+        return True
+    return False
+
+def schedule_update_tracker_update(new_datetime_str: str):
+    """Save new datetime to schedule update tracker."""
+    execute_query(
+        "INSERT INTO schedule_update_tracker (last_updated) VALUES (%s)",
+        (new_datetime_str,),
+    )
 
 
 def host_status_save_status(status: bool):
@@ -87,10 +120,10 @@ def host_status_get_total_time(previous_status: bool) -> Optional[timedelta]:
     return datetime.now(UTC_PLUS_2) - result[0][0] if result else None
 
 
-def outage_schedule_outdated(schedule_entries: List[Tuple[datetime]]) -> bool:
+def outage_schedule_outdated(schedule_entries: List[Tuple[bool, datetime]]) -> bool:
     """Check if the fetched schedule differs from the existing schedule in the database."""
     result = execute_query(
-        "SELECT time FROM outage_schedule WHERE time >= %s",
+        "SELECT status, time FROM outage_schedule WHERE time >= %s",
         (datetime.now(UTC_PLUS_2),),
         fetch=True,
     )
@@ -99,7 +132,7 @@ def outage_schedule_outdated(schedule_entries: List[Tuple[datetime]]) -> bool:
     return set(schedule_entries) != set(result)
 
 
-def outage_schedule_update(schedule_entries: List[Tuple[datetime]]):
+def outage_schedule_update(schedule_entries: List[Tuple[bool, datetime]]):
     """Update the outage schedule in the database."""
     try:
         with connect_to_db() as conn, conn.cursor() as cur:
@@ -107,7 +140,7 @@ def outage_schedule_update(schedule_entries: List[Tuple[datetime]]):
                 "DELETE FROM outage_schedule WHERE time >= %s",
                 (datetime.now(UTC_PLUS_2),),
             )
-            insert_query = "INSERT INTO outage_schedule (time) VALUES (%s)"
+            insert_query = "INSERT INTO outage_schedule (status, time) VALUES (%s, %s)"
             cur.executemany(insert_query, schedule_entries)
             conn.commit()
         logger.info("Outage schedule updated.")
@@ -129,10 +162,10 @@ def host_status_get_changes_between(
 
 def outage_schedule_get_between(
     start: datetime, end: datetime
-) -> List[Tuple[datetime]]:
+) -> List[Tuple[datetime, bool]]:
     """Retrieve outage schedules between two timestamps."""
     result = execute_query(
-        "SELECT time FROM outage_schedule WHERE time BETWEEN %s AND %s ORDER BY time",
+        "SELECT time, status FROM outage_schedule WHERE time BETWEEN %s AND %s ORDER BY time",
         (start, end),
         fetch=True,
     )
