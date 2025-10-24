@@ -23,18 +23,6 @@ class ConnectionStatus(Enum):
     DOWN = False
 
 
-class MonitoringError(Exception):
-    """Base exception for monitoring-related errors."""
-
-    pass
-
-
-class ConnectionError(MonitoringError):
-    """Exception raised when connection fails."""
-
-    pass
-
-
 @dataclass
 class HostConfig:
     """Configuration for host monitoring."""
@@ -140,7 +128,7 @@ class HostMonitor:
             )
         except Exception as e:
             logger.error(f"Failed to initialize monitoring: {e}")
-            raise MonitoringError(f"Initialization failed: {e}")
+            raise
 
     def get_last_status(self) -> Optional[bool]:
         """Get the last known status from database."""
@@ -156,7 +144,7 @@ class HostMonitor:
             self.host_status_repo.save_status(status)
         except Exception as e:
             logger.error(f"Failed to save status: {e}")
-            raise MonitoringError(f"Failed to save status: {e}")
+            raise
 
     def get_duration_since_last_change(self, previous_status: bool) -> timedelta:
         """Get duration since last status change."""

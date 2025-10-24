@@ -17,24 +17,6 @@ from config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 
-class DatabaseError(Exception):
-    """Base exception for database-related errors."""
-
-    pass
-
-
-class ConnectionError(DatabaseError):
-    """Exception raised when database connection fails."""
-
-    pass
-
-
-class QueryError(DatabaseError):
-    """Exception raised when database query fails."""
-
-    pass
-
-
 @dataclass
 class DatabaseConfig:
     """Database configuration."""
@@ -87,10 +69,10 @@ class DatabaseManager:
             yield conn
         except OperationalError as e:
             logger.error(f"Database connection failed: {e}")
-            raise ConnectionError(f"Failed to connect to database: {e}")
+            raise
         except Exception as e:
             logger.error(f"Unexpected database error: {e}")
-            raise DatabaseError(f"Database error: {e}")
+            raise
         finally:
             if conn:
                 conn.close()
@@ -107,11 +89,9 @@ class DatabaseManager:
                         return cur.fetchall()
                     conn.commit()
                     return None
-        except DatabaseError:
-            raise
         except Exception as e:
             logger.error(f"Query execution error: {e}")
-            raise QueryError(f"Query execution failed: {e}")
+            raise
 
     def execute_transaction(self, queries: List[Tuple[str, Optional[Tuple]]]) -> None:
         """Execute multiple queries in a transaction."""
@@ -121,11 +101,9 @@ class DatabaseManager:
                     for query, params in queries:
                         cur.execute(query, params or ())
                     conn.commit()
-        except DatabaseError:
-            raise
         except Exception as e:
             logger.error(f"Transaction execution error: {e}")
-            raise QueryError(f"Transaction failed: {e}")
+            raise
 
 
 # Global database manager instance
@@ -145,19 +123,6 @@ def get_database_manager() -> DatabaseManager:
         )
         _db_manager = DatabaseManager(config)
     return _db_manager
-
-
-# Legacy functions for backward compatibility
-def connect_to_db() -> psycopg.Connection:
-    """Legacy function for backward compatibility."""
-    manager = get_database_manager()
-    return manager.get_connection().__enter__()
-
-
-def execute_query(query: str, params=None, fetch: bool = False):
-    """Legacy function for backward compatibility."""
-    manager = get_database_manager()
-    return manager.execute_query(query, params, fetch)
 
 
 class BaseRepository:
@@ -238,41 +203,31 @@ class OutageScheduleRepository(BaseRepository):
         self.db_manager.execute_query(query)
         logger.info(f"{self.table_name} table initialized.")
 
-    def is_outdated(self, schedule_entries: List[Tuple[bool, datetime]]) -> bool:
-        """Check if the fetched schedule differs from the existing schedule in the database."""
-        query = f"SELECT status, time FROM {self.table_name} WHERE time >= %s"
-        result = self.db_manager.execute_query(
-            query, (datetime.now(KYIV_TIMEZONE),), fetch=True
-        )
-        if result is None:
-            logger.debug(
-                "No outage schedule found in database. Outage schedule is outdated."
-            )
-            return True
-        logger.debug(f"Set of schedule entries: {set(schedule_entries)}")
-        logger.debug(f"Set of result: {set(result)}")
-        return set(schedule_entries) != set(result)
+    def clear_schedule_for_date(self, date: datetime.date) -> None:
+        """Delete all schedule entries for a specific date."""
+        start_of_day = datetime.combine(date, datetime.min.time(), tzinfo=KYIV_TIMEZONE)
+        end_of_day = start_of_day + timedelta(days=1)
 
-    def update_schedule(self, schedule_entries: List[Tuple[bool, datetime]]) -> None:
-        """Update the outage schedule in the database."""
-        try:
-            with self.db_manager.get_connection() as conn:
-                with conn.cursor() as cur:
-                    # Delete existing future entries
-                    cur.execute(
-                        f"DELETE FROM {self.table_name} WHERE time >= %s",
-                        (datetime.now(KYIV_TIMEZONE),),
-                    )
-                    # Insert new entries
-                    insert_query = (
-                        f"INSERT INTO {self.table_name} (status, time) VALUES (%s, %s)"
-                    )
-                    cur.executemany(insert_query, schedule_entries)
-                    conn.commit()
-            logger.info("Outage schedule updated.")
-        except Exception as e:
-            logger.error(f"Error updating outage schedule: {e}")
-            raise QueryError(f"Failed to update outage schedule: {e}")
+        query = f"DELETE FROM {self.table_name} WHERE time >= %s AND time < %s"
+        self.db_manager.execute_query(query, (start_of_day, end_of_day))
+        logger.debug(f"Cleared schedule entries for {date}")
+
+    def insert_schedule_entries(
+        self, schedule_entries: List[Tuple[bool, datetime]]
+    ) -> None:
+        """Insert schedule entries into the database."""
+        if not schedule_entries:
+            logger.debug("No schedule entries to insert.")
+            return
+
+        query = f"INSERT INTO {self.table_name} (status, time) VALUES (%s, %s)"
+
+        with self.db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(query, schedule_entries)
+                conn.commit()
+
+        logger.debug(f"Inserted {len(schedule_entries)} schedule entries.")
 
     def get_schedule_between(
         self, start: datetime, end: datetime
@@ -301,8 +256,8 @@ class ScheduleUpdateTrackerRepository(BaseRepository):
         self.db_manager.execute_query(query)
         logger.info(f"{self.table_name} table initialized.")
 
-    def is_outdated(self, new_datetime_str: str) -> bool:
-        """Check if schedule was updated."""
+    def has_schedule_changed(self, new_datetime_str: str) -> bool:
+        """Check if schedule has changed since last check."""
         query = f"SELECT last_updated FROM {self.table_name} ORDER BY id DESC LIMIT 1"
         result = self.db_manager.execute_query(query, fetch=True)
         if not result:
@@ -312,11 +267,11 @@ class ScheduleUpdateTrackerRepository(BaseRepository):
         new_datetime = datetime.fromisoformat(new_datetime_str)
         stored_datetime = result[0][0]
         if new_datetime != stored_datetime:
-            logger.info("Schedule was updated since last check. Updating database.")
+            logger.info("Schedule has changed since last check.")
             return True
         return False
 
-    def update_tracker(self, new_datetime_str: str) -> None:
-        """Save new datetime to schedule update tracker."""
+    def save_last_updated_time(self, datetime_str: str) -> None:
+        """Save the last updated datetime to tracker."""
         query = f"INSERT INTO {self.table_name} (last_updated) VALUES (%s)"
-        self.db_manager.execute_query(query, (new_datetime_str,))
+        self.db_manager.execute_query(query, (datetime_str,))
