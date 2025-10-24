@@ -1,6 +1,7 @@
 # statistic_week.py
 
 import os
+import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 from zoneinfo import ZoneInfo
@@ -15,6 +16,9 @@ from db import (
     get_database_manager,
 )
 from tg import send_telegram_image
+
+logger.remove()
+logger.add(sys.stderr, level="DEBUG")
 
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
@@ -59,6 +63,9 @@ def split_events_by_day(
         logger.debug(f"{day_name:>9} | {int(status)} | {day_start}")
 
         for timestamp, status in day_events:
+            # Skip events that occur exactly at day_start (already added above)
+            if timestamp == day_start:
+                continue
             intervals[day_name].append((timestamp, status))
             logger.debug(f"{day_name:>9} | {int(status)} | {timestamp}")
 
@@ -83,29 +90,6 @@ def host_status_get_intervals_by_day(
     return split_events_by_day(start_time, events)
 
 
-def merge_consecutive_outages(
-    outage_times: List[datetime],
-) -> List[Tuple[datetime, bool]]:
-    """Merge consecutive outage times into intervals with start and end times."""
-    merged = []
-    if not outage_times:
-        return merged
-
-    outage_times.sort()
-    current_start = outage_times[0]
-    current_end = current_start + timedelta(hours=1)
-
-    for ot in outage_times[1:]:
-        if ot == current_end:
-            current_end += timedelta(hours=1)
-        else:
-            merged.extend([(current_start, False), (current_end, True)])
-            current_start = ot
-            current_end = ot + timedelta(hours=1)
-    merged.extend([(current_start, False), (current_end, True)])
-    return merged
-
-
 def outage_schedule_get_intervals_by_day(
     start_time: datetime,
 ) -> Dict[str, List[Tuple[datetime, bool]]]:
@@ -113,18 +97,35 @@ def outage_schedule_get_intervals_by_day(
     db_manager = get_database_manager()
     outage_repo = OutageScheduleRepository(db_manager)
 
-    # Get all outage entries in the week
-    outage_entries = outage_repo.get_schedule_between(
+    # Get all schedule entries in the week (returns List[Tuple[datetime, bool]])
+    # Format: (time, status) where status = True means power ON, False means power OFF
+    schedule_entries = outage_repo.get_schedule_between(
         start_time, start_time + timedelta(days=7)
     )
-    outage_times = [entry[0].astimezone(KYIV_TIMEZONE) for entry in outage_entries]
 
-    # Merge consecutive outages
-    merged_outages = merge_consecutive_outages(outage_times)
+    # Convert to proper format with timezone
+    events = [
+        (timestamp.astimezone(KYIV_TIMEZONE), status)
+        for timestamp, status in schedule_entries
+    ]
 
-    # Determine status at start_time
-    status_at_start = not any(ot == start_time for ot in outage_times)
-    events = [(start_time, status_at_start)] + merged_outages
+    # Determine status at start_time (check if there's any entry before start_time)
+    status_at_start = True  # Default to power ON
+    if events:
+        # If we have events, check if first event is before or at start_time
+        if events[0][0] <= start_time:
+            status_at_start = events[0][1]
+        else:
+            # Check database for last status before start_time
+            prev_entries = outage_repo.get_schedule_between(
+                start_time - timedelta(days=7), start_time
+            )
+            if prev_entries:
+                status_at_start = prev_entries[-1][1]
+
+    # Add initial status if needed
+    if not events or events[0][0] > start_time:
+        events = [(start_time, status_at_start)] + events
 
     return split_events_by_day(start_time, events)
 
@@ -288,7 +289,9 @@ def main():
     )
 
     actual_intervals = host_status_get_intervals_by_day(start_of_week)
+    logger.info("Actual intervals collected successfully")
     scheduled_intervals = outage_schedule_get_intervals_by_day(start_of_week)
+    logger.info("Scheduled intervals collected successfully")
 
     plot_weekly_intervals(actual_intervals, scheduled_intervals)
 
