@@ -245,7 +245,12 @@ class OutageScheduleRepository(BaseRepository):
             query, (datetime.now(KYIV_TIMEZONE),), fetch=True
         )
         if result is None:
+            logger.debug(
+                "No outage schedule found in database. Outage schedule is outdated."
+            )
             return True
+        logger.debug(f"Set of schedule entries: {set(schedule_entries)}")
+        logger.debug(f"Set of result: {set(result)}")
         return set(schedule_entries) != set(result)
 
     def update_schedule(self, schedule_entries: List[Tuple[bool, datetime]]) -> None:

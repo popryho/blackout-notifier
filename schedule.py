@@ -1,5 +1,6 @@
 # schedule.py
 
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,9 @@ from db import (
     get_database_manager,
 )
 from tg import escape_markdown_v2, format_duration, send_telegram_message
+
+logger.remove()
+logger.add(sys.stderr, level="INFO")
 
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
@@ -144,7 +148,15 @@ class ScheduleProcessor:
         for day_label in ["today", "tomorrow"]:
             day_data = getattr(schedule_data, day_label)
             date = datetime.fromisoformat(day_data["date"]).date()
-            entries.extend(self._process_day_schedule(day_data["slots"], date))
+
+            day_entries = self._process_day_schedule(day_data["slots"], date)
+
+            logger.debug(f"Date: {date}")
+            logger.debug(f"Day data slots: {day_data['slots']}")
+            logger.debug(f"Day entries: {day_entries}")
+            logger.debug(f"Status: {day_data['status']}")
+
+            entries.extend(day_entries)
 
         return entries
 
@@ -317,17 +329,20 @@ class ScheduleManager:
         try:
             # Fetch schedule data
             schedule_data = self.fetcher.fetch_schedule()
+            logger.debug(f"Schedule data: {schedule_data}")
             if not schedule_data:
                 logger.warning("No schedule data available.")
                 return
 
             # Check if schedule was updated
+            logger.debug(f"Updated on: {schedule_data.updated_on}")
             if not self._is_schedule_updated(schedule_data.updated_on):
-                logger.info("Schedule update not detected.")
+                logger.debug("Schedule update not detected.")
                 return
 
             # Process schedule entries
             schedule_entries = self.processor.process_schedule_data(schedule_data)
+            logger.debug(f"Schedule entries: {schedule_entries}")
             if not schedule_entries:
                 logger.warning("No valid schedule entries found.")
                 return
@@ -378,7 +393,7 @@ class ScheduleManager:
             message = self.message_builder.build_message(schedule_entries, updated_on)
             if message:
                 send_telegram_message(message, parse_mode="MarkdownV2")
-                logger.info("Notification sent successfully.")
+                logger.info("Message sent successfully.")
         except Exception as e:
             logger.error(f"Failed to send notification: {e}")
 
