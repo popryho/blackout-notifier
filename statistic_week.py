@@ -52,10 +52,29 @@ def split_events_by_day(
         ]
 
         # Determine the status at the start of the day
-        prev_events = [
-            (timestamp, status) for timestamp, status in events if timestamp < day_start
-        ]
-        status = prev_events[-1][1] if prev_events else events[0][1] if events else True
+        # Check if there's an event exactly at day_start
+        event_at_day_start = next(
+            (
+                (timestamp, status)
+                for timestamp, status in day_events
+                if timestamp == day_start
+            ),
+            None,
+        )
+
+        if event_at_day_start:
+            # Use the event at day_start
+            status = event_at_day_start[1]
+        else:
+            # Use the last event before day_start
+            prev_events = [
+                (timestamp, status)
+                for timestamp, status in events
+                if timestamp < day_start
+            ]
+            status = (
+                prev_events[-1][1] if prev_events else events[0][1] if events else True
+            )
 
         intervals[day_name].append((day_start, status))
         logger.debug(f"{day_name:>9} | {int(status)} | {day_start}")
