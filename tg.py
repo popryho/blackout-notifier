@@ -1,14 +1,11 @@
 # utils.py
 
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-
-KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, KYIV_TIMEZONE
 
 
 def send_telegram_message(message: str, parse_mode: str = None) -> None:

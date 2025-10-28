@@ -4,12 +4,12 @@ import os
 import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
-from zoneinfo import ZoneInfo
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 from loguru import logger
 
+from config import KYIV_TIMEZONE
 from db import (
     HostStatusRepository,
     OutageScheduleRepository,
@@ -19,8 +19,6 @@ from tg import send_telegram_image
 
 logger.remove()
 logger.add(sys.stderr, level="DEBUG")
-
-KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 DAYS_OF_WEEK = [
     "Monday",

@@ -5,16 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
-from zoneinfo import ZoneInfo
 
 import psycopg
 from loguru import logger
 from psycopg.conninfo import make_conninfo
 from psycopg.errors import OperationalError
 
-from config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
-
-KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
+from config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER, KYIV_TIMEZONE
 
 
 @dataclass
@@ -203,14 +200,11 @@ class OutageScheduleRepository(BaseRepository):
         self.db_manager.execute_query(query)
         logger.info(f"{self.table_name} table initialized.")
 
-    def clear_schedule_for_date(self, date: datetime.date) -> None:
-        """Delete all schedule entries for a specific date."""
-        start_of_day = datetime.combine(date, datetime.min.time(), tzinfo=KYIV_TIMEZONE)
-        end_of_day = start_of_day + timedelta(days=1)
-
+    def clear_schedule_between(self, start_time: datetime, end_time: datetime) -> None:
+        """Delete schedule entries between two timestamps."""
         query = f"DELETE FROM {self.table_name} WHERE time >= %s AND time < %s"
-        self.db_manager.execute_query(query, (start_of_day, end_of_day))
-        logger.debug(f"Cleared schedule entries for {date}")
+        self.db_manager.execute_query(query, (start_time, end_time))
+        logger.debug(f"Cleared schedule entries from {start_time} to {end_time}")
 
     def insert_schedule_entries(
         self, schedule_entries: List[Tuple[bool, datetime]]

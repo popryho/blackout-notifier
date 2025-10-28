@@ -3,15 +3,14 @@
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
 
-from config import CHECK_INTERVAL, DSO_ID, GROUP_ID, REGION_ID
+from config import CHECK_INTERVAL, DSO_ID, GROUP_ID, KYIV_TIMEZONE, REGION_ID
 from db import (
     OutageScheduleRepository,
     ScheduleUpdateTrackerRepository,
@@ -20,13 +19,22 @@ from db import (
 from tg import escape_markdown_v2, format_duration, send_telegram_message
 
 logger.remove()
-logger.add(sys.stderr, level="DEBUG")
-
-KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
+logger.add(sys.stderr, level="INFO")
 
 
 def parse_slot_time(minutes_since_midnight: int, date: datetime.date) -> datetime:
     """Parse slot time from minutes since midnight."""
+    
+    if minutes_since_midnight == 1440:  # 24:00
+        return datetime(
+            date.year,
+            date.month,
+            date.day,
+            23,
+            59,
+            tzinfo=KYIV_TIMEZONE,
+        )
+
     hours = minutes_since_midnight // 60
     minutes = minutes_since_midnight % 60
 
@@ -254,6 +262,8 @@ class ScheduleManager:
             if not self._is_schedule_updated(schedule_data.updated_on):
                 logger.debug("Schedule not updated since last check.")
                 return
+            logger.info(f"Schedule updated: {schedule_data.updated_on}")
+            logger.info(f"Schedule data: {schedule_data}")
 
             # Update database with new schedule
             self._update_database(schedule_data)
@@ -285,7 +295,11 @@ class ScheduleManager:
 
         # Process each day separately
         for date, entries in entries_by_date.items():
-            self.outage_repo.clear_schedule_for_date(date)
+            start_time = datetime.combine(
+                date, datetime.min.time(), tzinfo=KYIV_TIMEZONE
+            )
+            end_time = start_time + timedelta(days=1)
+            self.outage_repo.clear_schedule_between(start_time, end_time)
             self.outage_repo.insert_schedule_entries(entries)
 
         logger.info(
