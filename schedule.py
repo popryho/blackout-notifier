@@ -24,7 +24,7 @@ logger.add(sys.stderr, level="INFO")
 
 def parse_slot_time(minutes_since_midnight: int, date: datetime.date) -> datetime:
     """Parse slot time from minutes since midnight."""
-    
+
     if minutes_since_midnight == 1440:  # 24:00
         return datetime(
             date.year,
@@ -265,13 +265,17 @@ class ScheduleManager:
             logger.info(f"Schedule updated: {schedule_data.updated_on}")
             logger.info(f"Schedule data: {schedule_data}")
 
-            # Update database with new schedule
-            self._update_database(schedule_data)
+            # Update database with new schedule (only if changed)
+            has_changes = self._update_database(schedule_data)
 
-            # Send notification
-            self._send_notification(schedule_data)
-
-            logger.info("Schedule updated and notification sent.")
+            # Send notification only if there were actual changes
+            if has_changes:
+                self._send_notification(schedule_data)
+                logger.info("Schedule updated and notification sent.")
+            else:
+                logger.info(
+                    "Schedule metadata updated but no content changes detected."
+                )
 
         except Exception as e:
             logger.error(f"Error in update_and_notify: {e}")
@@ -283,28 +287,99 @@ class ScheduleManager:
             return True
         return False
 
-    def _update_database(self, schedule_data: ScheduleData) -> None:
-        """Update the database with new schedule data."""
+    def _has_schedule_changed_for_date(
+        self, date: datetime.date, new_entries: List[Tuple[bool, datetime]]
+    ) -> bool:
+        """Check if schedule has changed for a specific date.
+
+        Args:
+            date: The date to check
+            new_entries: New schedule entries as list of (status, time) tuples
+
+        Returns:
+            True if schedule has changed, False otherwise.
+        """
+        start_time = datetime.combine(date, datetime.min.time(), tzinfo=KYIV_TIMEZONE)
+        end_time = start_time + timedelta(days=1) - timedelta(seconds=1)
+
+        # Get existing entries from database
+        existing_entries = self.outage_repo.get_schedule_between(start_time, end_time)
+
+        # Compare entries
+        return not self._are_schedule_entries_equal(new_entries, existing_entries)
+
+    def _are_schedule_entries_equal(
+        self,
+        new_entries: List[Tuple[bool, datetime]],
+        existing_entries: List[Tuple[datetime, bool]],
+    ) -> bool:
+        """Compare two lists of schedule entries for equality.
+
+        Args:
+            new_entries: New entries as list of (status, time) tuples
+            existing_entries: Existing entries from DB as list of (time, status) tuples
+
+        Returns:
+            True if entries are equal, False otherwise.
+        """
+        if len(new_entries) != len(existing_entries):
+            return False
+
+        # Convert new_entries to (time, status) format and sort by time
+        new_sorted = sorted([(time, status) for status, time in new_entries])
+        existing_sorted = sorted(existing_entries)
+
+        # Compare each entry
+        for (new_time, new_status), (existing_time, existing_status) in zip(
+            new_sorted, existing_sorted
+        ):
+            # Compare times (allowing for small differences due to microseconds)
+            if abs((new_time - existing_time).total_seconds()) > 1:
+                return False
+            if new_status != existing_status:
+                return False
+
+        return True
+
+    def _update_database(self, schedule_data: ScheduleData) -> bool:
+        """Update the database with new schedule data.
+
+        Returns:
+            True if any changes were made, False otherwise.
+        """
         entries_by_date = self.processor.process_schedule_to_database_entries(
             schedule_data
         )
 
         if not entries_by_date:
             logger.info("No schedule entries to update in database.")
-            return
+            return False
 
-        # Process each day separately
-        for date, entries in entries_by_date.items():
-            start_time = datetime.combine(
-                date, datetime.min.time(), tzinfo=KYIV_TIMEZONE
+        # Process each day separately, only updating if changed
+        dates_updated = []
+        for date, new_entries in entries_by_date.items():
+            if self._has_schedule_changed_for_date(date, new_entries):
+                start_time = datetime.combine(
+                    date, datetime.min.time(), tzinfo=KYIV_TIMEZONE
+                )
+                end_time = start_time + timedelta(days=1)
+                self.outage_repo.clear_schedule_between(start_time, end_time)
+                self.outage_repo.insert_schedule_entries(new_entries)
+                dates_updated.append(date)
+            else:
+                logger.info(
+                    f"No changes detected for {date}, skipping database update."
+                )
+
+        if dates_updated:
+            total_entries = sum(len(entries_by_date[date]) for date in dates_updated)
+            logger.info(
+                f"Database updated for {len(dates_updated)} date(s) with {total_entries} total entries."
             )
-            end_time = start_time + timedelta(days=1)
-            self.outage_repo.clear_schedule_between(start_time, end_time)
-            self.outage_repo.insert_schedule_entries(entries)
-
-        logger.info(
-            f"Database updated for {len(entries_by_date)} date(s) with {sum(len(e) for e in entries_by_date.values())} total entries."
-        )
+            return True
+        else:
+            logger.info("No schedule changes detected for any date.")
+            return False
 
     def _send_notification(self, schedule_data: ScheduleData) -> None:
         """Send notification message."""
