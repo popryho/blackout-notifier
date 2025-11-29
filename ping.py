@@ -1,4 +1,3 @@
-# ping.py
 import socket
 import time
 from dataclasses import dataclass
@@ -8,7 +7,7 @@ from typing import Optional
 
 from loguru import logger
 
-from config import CHECK_INTERVAL, HOST_TO_MONITOR, PORT_TO_MONITOR
+from config import CHECK_INTERVAL, HOST_TO_MONITOR, PORT_TO_MONITOR, AVAILABILITY_WINDOW
 from db import (
     HostStatusRepository,
     get_database_manager,
@@ -17,8 +16,6 @@ from tg import format_duration, send_telegram_message
 
 
 class ConnectionStatus(Enum):
-    """Enum for connection status."""
-
     UP = True
     DOWN = False
 
@@ -26,80 +23,93 @@ class ConnectionStatus(Enum):
 @dataclass
 class HostConfig:
     """Configuration for host monitoring."""
-
     host: str
     port: int
     timeout: int = 5
     check_interval: int = 60
+    # New settings for hysteresis (dampening)
+    availability_window: int = 30  # How long to try before giving up (seconds)
+    retry_gap: int = 2             # Sleep between retries within the window (seconds)
 
     def __post_init__(self):
-        """Validate configuration after initialization."""
         if not self.host:
             raise ValueError("Host cannot be empty")
         if not (1 <= self.port <= 65535):
             raise ValueError("Port must be between 1 and 65535")
-        if self.timeout <= 0:
-            raise ValueError("Timeout must be positive")
-        if self.check_interval <= 0:
-            raise ValueError("Check interval must be positive")
+        if self.availability_window < self.timeout:
+            logger.warning("Availability window is shorter than socket timeout.")
 
 
 @dataclass
 class StatusChange:
-    """Represents a status change event."""
-
     new_status: bool
     duration: timedelta
 
     @property
     def is_up(self) -> bool:
-        """Check if the new status is UP."""
         return self.new_status == ConnectionStatus.UP.value
-
-    @property
-    def is_down(self) -> bool:
-        """Check if the new status is DOWN."""
-        return self.new_status == ConnectionStatus.DOWN.value
 
 
 class ConnectionChecker:
-    """Handles connection checking to a host."""
+    """Handles connection checking to a host with retry logic."""
 
     def __init__(self, config: HostConfig):
         self.config = config
 
-    def is_server_available(self) -> bool:
-        """Check if the server is available."""
+    def _single_connection_attempt(self) -> bool:
+        """
+        Try to connect once.
+        Returns True if successful, False if failed.
+        """
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(self.config.timeout)
-                s.connect((self.config.host, self.config.port))
+            with socket.create_connection(
+                (self.config.host, self.config.port), timeout=self.config.timeout
+            ):
                 return True
-        except socket.timeout:
-            logger.warning(
-                f"Connection timeout to {self.config.host}:{self.config.port}"
-            )
-            return False
-        except socket.error as e:
-            logger.warning(
-                f"Connection error to {self.config.host}:{self.config.port}: {e}"
-            )
+        except (socket.timeout, socket.error):
+            # We don't log errors here to avoid spamming logs during the retry window
             return False
         except Exception as e:
-            logger.error(
-                f"Unexpected error checking {self.config.host}:{self.config.port}: {e}"
-            )
+            logger.error(f"Unexpected error: {e}")
             return False
+
+    def is_server_available(self) -> bool:
+        """
+        Determines availability based on a time window.
+        
+        Logic:
+        1. Attempt to connect.
+        2. If successful: Return True immediately (Short-circuit).
+        3. If failed: Wait `retry_gap` and try again.
+        4. If time exceeds `availability_window`: Return False.
+        
+        This filters out packet loss. If ANY packet gets through in the window,
+        the service is considered UP.
+        """
+        start_time = time.time()
+        end_time = start_time + self.config.availability_window
+        attempt_count = 0
+
+        while time.time() < end_time:
+            attempt_count += 1
+            if self._single_connection_attempt():
+                if attempt_count > 1:
+                    logger.info(f"Connection recovered after {attempt_count} attempts.")
+                return True
+            
+            # Wait before next retry, but don't oversleep past end_time
+            time.sleep(self.config.retry_gap)
+
+        logger.warning(
+            f"Server unavailable. Failed all attempts over {self.config.availability_window}s window."
+        )
+        return False
 
 
 class MessageBuilder:
-    """Handles building status change messages."""
-
     @staticmethod
     def create_status_message(status_change: StatusChange) -> str:
-        """Create a status change message."""
         duration_str = format_duration(status_change.duration)
-
         if status_change.is_up:
             return f"🟢 Світло з'явилося\n🕓 Його не було {duration_str}"
         else:
@@ -107,132 +117,101 @@ class MessageBuilder:
 
 
 class HostMonitor:
-    """Main class for monitoring host connectivity."""
-
     def __init__(self, config: HostConfig):
         self.config = config
-        self.connection_checker = ConnectionChecker(config)
+        self.checker = ConnectionChecker(config)
         self.message_builder = MessageBuilder()
         self.last_status: Optional[bool] = None
 
-        # Initialize database repository
         self.db_manager = get_database_manager()
         self.host_status_repo = HostStatusRepository(self.db_manager)
 
     def initialize(self) -> None:
-        """Initialize the monitoring system."""
         try:
             self.host_status_repo.initialize_table()
-            logger.info(
-                f"Host monitoring initialized for {self.config.host}:{self.config.port}"
-            )
+            # Determine initial state from DB to avoid false alerts on restart
+            self.last_status = self.host_status_repo.get_last_status()
+            logger.info(f"Monitor initialized. Previous known status: {self.last_status}")
         except Exception as e:
             logger.error(f"Failed to initialize monitoring: {e}")
             raise
 
-    def get_last_status(self) -> Optional[bool]:
-        """Get the last known status from database."""
-        try:
-            return self.host_status_repo.get_last_status()
-        except Exception as e:
-            logger.error(f"Failed to get last status: {e}")
-            return None
-
-    def save_status(self, status: bool) -> None:
-        """Save current status to database."""
-        try:
-            self.host_status_repo.save_status(status)
-        except Exception as e:
-            logger.error(f"Failed to save status: {e}")
-            raise
-
-    def get_duration_since_last_change(self, previous_status: bool) -> timedelta:
-        """Get duration since last status change."""
-        try:
-            total_time = self.host_status_repo.get_total_time(previous_status)
-            return total_time if total_time is not None else timedelta()
-        except Exception as e:
-            logger.error(f"Failed to get duration: {e}")
-            return timedelta()
-
-    def handle_status_change(self, current_status: bool) -> None:
-        """Handle a status change event."""
+    def process_status_change(self, current_status: bool) -> None:
+        """
+        Compare current status with last known status and act if changed.
+        """
+        # Case 1: First run (DB was empty)
         if self.last_status is None:
-            # Initial status
-            self.save_status(current_status)
-            status_str = "UP" if current_status else "DOWN"
-            logger.info(
-                f"Host {self.config.host}:{self.config.port} initial status is {status_str}"
-            )
+            self.host_status_repo.save_status(current_status)
             self.last_status = current_status
+            logger.info(f"Initial status recorded: {'UP' if current_status else 'DOWN'}")
             return
 
-        if current_status != self.last_status:
-            # Status changed
-            self.save_status(current_status)
-            duration = self.get_duration_since_last_change(self.last_status)
+        # Case 2: Status is the same -> Do nothing
+        if current_status == self.last_status:
+            return
 
-            status_change = StatusChange(
-                new_status=current_status,
-                duration=duration,
-            )
-
-            message = self.message_builder.create_status_message(status_change)
-            self._send_notification(message)
-            logger.info(message)
-            self.last_status = current_status
+        # Case 3: Status changed
+        logger.info(f"Status changed: {self.last_status} -> {current_status}")
+        
+        # 1. Save new status immediately
+        self.host_status_repo.save_status(current_status)
+        
+        # 2. Calculate how long we were in the PREVIOUS state
+        duration = self.host_status_repo.get_total_time(self.last_status) or timedelta()
+        
+        # 3. Notify
+        change_event = StatusChange(new_status=current_status, duration=duration)
+        msg = self.message_builder.create_status_message(change_event)
+        
+        self._send_notification(msg)
+        logger.info(msg)
+        
+        # 4. Update memory state
+        self.last_status = current_status
 
     def _send_notification(self, message: str) -> None:
-        """Send notification message."""
         try:
             send_telegram_message(message)
         except Exception as e:
             logger.error(f"Failed to send notification: {e}")
 
-    def check_once(self) -> None:
-        """Perform a single connectivity check."""
-        try:
-            current_status = self.connection_checker.is_server_available()
-            self.handle_status_change(current_status)
-        except Exception as e:
-            logger.error(f"Error during connectivity check: {e}")
-
     def run(self) -> None:
-        """Main monitoring loop."""
-        logger.info("Starting host monitoring...")
-
-        # Initialize last status from database
-        self.last_status = self.get_last_status()
-
+        logger.info(f"Starting monitoring loop for {self.config.host}:{self.config.port}")
+        
         while True:
             try:
-                self.check_once()
+                # 1. Perform the check (this may take up to availability_window seconds)
+                is_up = self.checker.is_server_available()
+                
+                # 2. Process results
+                self.process_status_change(is_up)
+
             except KeyboardInterrupt:
                 logger.info("Monitoring stopped by user.")
                 break
             except Exception as e:
-                logger.error(f"Unexpected error in monitoring loop: {e}")
+                logger.error(f"Critical error in monitoring loop: {e}")
+                # Sleep briefly to avoid busy loop in case of database errors
+                time.sleep(5)
 
+            # 3. Wait for the next check cycle
             time.sleep(self.config.check_interval)
 
 
 def main():
-    """Main function to run host monitoring."""
-    try:
-        config = HostConfig(
-            host=HOST_TO_MONITOR,
-            port=PORT_TO_MONITOR,
-            timeout=5,
-            check_interval=CHECK_INTERVAL,
-        )
+    config = HostConfig(
+        host=HOST_TO_MONITOR,
+        port=PORT_TO_MONITOR,
+        timeout=5,
+        check_interval=CHECK_INTERVAL,
+        availability_window=AVAILABILITY_WINDOW,  # Try for 30 seconds before declaring DOWN
+        retry_gap=2              # Wait 2 seconds between attempts inside the window
+    )
 
-        monitor = HostMonitor(config)
-        monitor.initialize()
-        monitor.run()
-
-    except Exception as e:
-        logger.error(f"Failed to start monitoring: {e}")
-        raise
+    monitor = HostMonitor(config)
+    monitor.initialize()
+    monitor.run()
 
 
 if __name__ == "__main__":
