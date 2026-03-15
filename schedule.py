@@ -208,7 +208,7 @@ class MessageBuilder:
                     message_lines.append(escape_markdown_v2(line))
 
         if not has_outages:
-            message_lines.append("▪️ Наразі незаплановано")
+            message_lines.append("▪️ Наразі не заплановано")
 
         return "\n".join(message_lines)
 
