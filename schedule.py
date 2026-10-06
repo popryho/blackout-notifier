@@ -129,6 +129,11 @@ class ScheduleProcessor:
                 logger.debug(f"No slots for {day_label}")
                 continue
 
+            # Placeholder slots until the schedule is published; not real data
+            if day_data.get("status") == "WaitingForSchedule":
+                logger.debug(f"Schedule for {day_label} not published yet")
+                continue
+
             date = datetime.fromisoformat(day_data["date"]).date()
             day_entries = []
 

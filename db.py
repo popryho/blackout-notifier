@@ -260,9 +260,13 @@ class ScheduleUpdateTrackerRepository(BaseRepository):
 
         new_datetime = datetime.fromisoformat(new_datetime_str)
         stored_datetime = result[0][0]
-        if new_datetime != stored_datetime:
+        if new_datetime > stored_datetime:
             logger.info("Schedule has changed since last check.")
             return True
+        if new_datetime < stored_datetime:
+            logger.warning(
+                f"Ignoring stale schedule (updatedOn {new_datetime} < stored {stored_datetime})"
+            )
         return False
 
     def save_last_updated_time(self, datetime_str: str) -> None:
