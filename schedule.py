@@ -217,6 +217,18 @@ class MessageBuilder:
 
         return "\n".join(message_lines)
 
+    def build_emergency_message(
+        self, schedule_data: ScheduleData, dates: List[datetime.date]
+    ) -> str:
+        """Construct a Telegram message about emergency shutdowns."""
+        header = self._build_header(schedule_data.updated_on)
+        dates_str = ", ".join(date.strftime("*%d\\.%m\\.%Y*") for date in dates)
+        return (
+            f"{header}\n\n"
+            f"⚠️ Аварійні відключення\n"
+            f"{escape_markdown_v2('▪️ Графік не діє на')} {dates_str}"
+        )
+
     def _build_header(self, updated_on: str) -> str:
         """Build the message header."""
         dt = datetime.fromisoformat(updated_on)
@@ -238,6 +250,8 @@ class ScheduleManager:
         self.processor = ScheduleProcessor()
         self.message_builder = MessageBuilder(group_id)
         self.check_interval = check_interval
+        # Emergency dates already notified, to send the warning only once
+        self.notified_emergency_dates: List[datetime.date] = []
 
         # Initialize database repositories
         self.db_manager = get_database_manager()
@@ -270,6 +284,9 @@ class ScheduleManager:
             logger.info(f"Schedule updated: {schedule_data.updated_on}")
             logger.info(f"Schedule data: {schedule_data}")
 
+            # Warn about emergency shutdowns (schedule has no slots then)
+            self._notify_emergency_if_needed(schedule_data)
+
             # Update database with new schedule (only if changed)
             has_changes = self._update_database(schedule_data)
 
@@ -284,6 +301,26 @@ class ScheduleManager:
 
         except Exception as e:
             logger.error(f"Error in update_and_notify: {e}")
+
+    def _notify_emergency_if_needed(self, schedule_data: ScheduleData) -> None:
+        """Send emergency notification once per new set of emergency dates."""
+        emergency_dates = [
+            datetime.fromisoformat(day_data["date"]).date()
+            for day_data in (schedule_data.today, schedule_data.tomorrow)
+            if day_data.get("status") == "EmergencyShutdowns"
+        ]
+
+        if emergency_dates and emergency_dates != self.notified_emergency_dates:
+            try:
+                message = self.message_builder.build_emergency_message(
+                    schedule_data, emergency_dates
+                )
+                send_telegram_message(message, parse_mode="MarkdownV2")
+                logger.info(f"Emergency notification sent for {emergency_dates}.")
+            except Exception as e:
+                logger.error(f"Failed to send emergency notification: {e}")
+
+        self.notified_emergency_dates = emergency_dates
 
     def _is_schedule_updated(self, updated_on: str) -> bool:
         """Check if the schedule was updated."""
