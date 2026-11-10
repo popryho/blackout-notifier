@@ -9,13 +9,15 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 from loguru import logger
 
+import config
 from config import KYIV_TIMEZONE
 from db import (
     HostStatusRepository,
     OutageScheduleRepository,
     get_database_manager,
 )
-from tg import send_telegram_image
+from tg import send_telegram_image, send_telegram_widget
+from widget_week import build_weekly_widget
 
 logger.remove()
 logger.add(sys.stderr, level="DEBUG")
@@ -316,6 +318,17 @@ def main():
     logger.info("Weekly power outage statistics sent to Telegram.")
 
     os.remove("weekly_intervals.png")
+
+    # Optional interactive copy for a private chat (widgets can't go to channels)
+    widget_chat_id = getattr(config, "TELEGRAM_WIDGET_CHAT_ID", None)
+    if widget_chat_id:
+        html, caption = build_weekly_widget(
+            start_of_week, actual_intervals, scheduled_intervals
+        )
+        if html is None:
+            logger.warning("Weekly widget exceeds Telegram size limits, skipped.")
+        else:
+            send_telegram_widget(widget_chat_id, html, caption)
 
 
 if __name__ == "__main__":

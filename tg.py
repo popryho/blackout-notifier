@@ -75,3 +75,26 @@ def send_telegram_image(
         logger.error(f"Image file not found: {image_path}")
     except requests.RequestException as e:
         logger.error(f"Failed to send Telegram image: {e}")
+
+
+def send_telegram_widget(chat_id, html: str, caption: str) -> bool:
+    """Send an HTML widget (Bot API 10.4). Works in private chats with the bot only."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendWidget"
+    data = {"chat_id": chat_id, "html": html, "caption": caption}
+
+    current_hour = datetime.now(KYIV_TIMEZONE).hour
+    if 23 <= current_hour or current_hour < 7:
+        data["disable_notification"] = True
+
+    try:
+        response = requests.post(url, data=data)
+        if not response.ok:
+            logger.error(
+                f"Failed to send Telegram widget: {response.status_code} {response.text}"
+            )
+            return False
+        logger.info("Telegram widget sent successfully.")
+        return True
+    except requests.RequestException as e:
+        logger.error(f"Failed to send Telegram widget: {e}")
+        return False
